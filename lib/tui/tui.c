@@ -614,6 +614,12 @@ void tui_destroy(TuiApp *app){
     if(!app)return;
     /* 取消正在执行的 Job */
     if(app->pending_job){worker_cancel(app->pending_job);job_free(app->pending_job);}
+    /* 安全分离被调试进程 (必须在 notcurses_stop 之前, tracee 崩溃) */
+    if(app->debug){
+        debug_detach(app->debug);
+        debug_free(app->debug);
+        app->debug = NULL;
+    }
     if(app->left_data.fields)fields_free(app->left_data.fields,app->left_data.count);
     if(app->middle_data.fields)fields_free(app->middle_data.fields,app->middle_data.count);
     if(app->right_data.fields)fields_free(app->right_data.fields,app->right_data.count);
@@ -975,6 +981,7 @@ void tui_render_all(TuiApp *app){
 void tui_run(TuiApp *app){
     TuiApp *a=app;
     struct ncinput ni;
+    int quit_confirm = 0;   /* 退出确认弹窗是否激活 */
 
     /* 初始渲染 */
     a->need_render = 1;
@@ -1008,6 +1015,18 @@ void tui_run(TuiApp *app){
         }else{
             /* ── 有按键 → 分发处理 ── */
             if(a->popup_active){
+                /* 退出确认弹窗: 仅接受 y(确认) / n(取消) */
+                if(quit_confirm){
+                    if(code == 'y' || code == 'Y'){
+                        a->running = 0; continue;
+                    }
+                    if(code == 'n' || code == 'N' || code == NCKEY_ESC){
+                        a->popup_active = 0;
+                        quit_confirm = 0;
+                        a->need_render = 1; continue;
+                    }
+                    continue;  /* 忽略其他所有按键 */
+                }
                 /* 弹窗模式: 限制按键处理 (只有输入模式 + 关闭弹窗) */
                 if(a->pid_input_active || a->search_input_active){
                     tui_handle_input(a, &ni);
@@ -1019,8 +1038,16 @@ void tui_run(TuiApp *app){
                 /* 弹窗模式: 忽略其他所有按键 */
             }else{
                 /* ── 正常模式 ── */
-                /* Space: 全局搜索 */
-                if(code == ' ' && !a->search_input_active && !a->pid_input_active){
+                if(code == 'q' || code == 'Q'){
+                    /* 退出确认弹窗 */
+                    quit_confirm = 1;
+                    tui_show_popup(a, "Quit",
+                        "Are you sure you want to quit elf-tui?\n\n"
+                        "  [y]  Yes, quit\n"
+                        "  [n]  No, cancel");
+                    a->need_render = 1;
+                }else if(code == ' ' && !a->search_input_active && !a->pid_input_active){
+                    /* Space: 全局搜索 */
                     a->search_input_active = 1; a->search_input_pos = 0;
                     memset(a->search_input_buf, 0, sizeof(a->search_input_buf));
                     tui_show_popup(a, "Global Search (DB)",
