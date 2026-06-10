@@ -479,18 +479,73 @@ int btn_symbolic_action(TuiApp *app)
 }
 
 /* ================================================================== */
-/* Decompile — C 伪代码反编译 (v4 section-aware)                       */
+/* Decompile — 地址为中心的运行时反编译 (需要 attach 进程)              */
+/*                                                                     */
+/* 核心逻辑: 静态 ELF 地址 + 运行时加载基址 = 真实内存地址             */
+/*   load_base = /proc/PID/maps 中可执行段首地址 - 第一个 PT_LOAD vaddr */
+/*   真实地址 = load_base + 静态地址 (DB 中的地址)                      */
 /* ================================================================== */
 
 int btn_decompile_action(TuiApp *app)
 {
     if (!app) return -1;
+
+    /* ── 前提 1: 必须 attach 到进程 ── */
+    if (!app->debug || !app->debug->attached) {
+        tui_show_popup(app, "Decompile — Not Attached",
+            "Decompile requires a live process.\n\n"
+            "1. Expand 'Debug' in the left panel\n"
+            "2. Click 'Attach' → enter target PID\n"
+            "3. Then click 'Decompile'\n\n"
+            "Real addresses (after ASLR) can only be\n"
+            "resolved when attached to a running process.");
+        app->need_render = 1; return 0;
+    }
+
+    /* ── 前提 2: DB 必须就绪 ── */
     if (!app->adb) {
-        tui_show_popup(app, "Decompile", "DB not available.\nImport ELF first.");
+        tui_show_popup(app, "Decompile", "DB not ready.\nImport ELF first.");
         app->need_render = 1; return 0;
     }
     g_active_db = app->adb;
 
+    /* ── 计算运行时加载基址 ── */
+    extern uint64_t decompile_load_base;  /* decompile.c 中的全局变量 */
+    decompile_load_base = 0;
+
+    {
+        /* 获取 ELF 第一个 PT_LOAD 的虚拟地址 */
+        Elf64_Ehdr *ehdr = elf_get_ehdr(app->elf);
+        uint64_t first_load_vaddr = 0;
+        int found = 0;
+        for (int i = 0; i < ehdr->e_phnum && !found; i++) {
+            Elf64_Phdr *ph = elf_get_phdr(app->elf, i);
+            if (ph && ph->p_type == 1 /* PT_LOAD */) {  /* PT_LOAD */
+                first_load_vaddr = ph->p_vaddr;
+                found = 1;
+            }
+        }
+
+        /* 从 /proc/PID/maps 获取可执行段的首地址 */
+        char mappath[64];
+        snprintf(mappath, sizeof(mappath), "/proc/%d/maps", app->debug->pid);
+        FILE *mf = fopen(mappath, "r");
+        if (mf) {
+            char line[512];
+            while (fgets(line, sizeof(line), mf)) {
+                uint64_t s, e; char perms[8], path[256] = "";
+                int nf = sscanf(line, "%lx-%lx %4s %*s %*s %*s %255s", &s, &e, perms, path);
+                if (nf >= 3 && perms[2] == 'x') {
+                    /* 找到第一个可执行段 → 这就是 text 段在内存中的起始地址 */
+                    decompile_load_base = s - first_load_vaddr;
+                    break;
+                }
+            }
+            fclose(mf);
+        }
+    }
+
+    /* 清空中面板 */
     if (app->middle_data.fields) {
         fields_free(app->middle_data.fields, app->middle_data.count);
         app->middle_data.fields = NULL;

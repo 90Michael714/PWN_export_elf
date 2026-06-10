@@ -650,13 +650,19 @@ int tui_handle_input(TuiApp *app, const struct ncinput *ni){
                     app->need_render=1;return 1;
                 }else if(msel && msel->selectable && app->middle_data.count > 0 &&
                    strstr(app->middle_data.fields[0].text, "Decompile")){
-                    /* Decompile 函数列表 → Enter → 右面板 C伪代码 */
+                    /* Decompile: 从文本行解析真实地址 → 反算静态地址 → 查询 DB */
                     uint64_t addr = 0;
-                    if(msel->detail_index != -1)
-                        addr = (uint64_t)(msel->detail_index & 0x7FFFFFFF);
+                    /* 优先从 detail_index 取静态地址 (最可靠) */
+                    if(msel->detail_index > 0)
+                        addr = (uint64_t)msel->detail_index;
+                    /* 备用: 从文本行解析 */
                     if(!addr && msel->text){
                         const char *p=strstr(msel->text,"0x");
                         if(p)addr=strtoull(p,NULL,16);
+                        /* 如果是真实地址, 减去 load_base 得到静态地址 */
+                        extern uint64_t decompile_load_base;
+                        if(addr > decompile_load_base && decompile_load_base > 0)
+                            addr = addr - decompile_load_base;
                     }
                     if(addr > 0x100 && app->adb && !app->db_importing){
                         if(app->right_data.fields){
