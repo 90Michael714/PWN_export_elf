@@ -112,8 +112,6 @@ void left_panel_init(PanelData *pd, Elf64_Ctx *ctx)
         add_button(pd, "DF Inter",   BTN_DATAFLOW_INTER);
     }
 
-    /* Decompile: 独立顶级入口 */
-    fields_add(pd, "▶ Decompile", 0, 1, DETAIL_NONE, BTN_DECOMPILE);
 
     /* ============================================
      * 5. Security Audit (可折叠)

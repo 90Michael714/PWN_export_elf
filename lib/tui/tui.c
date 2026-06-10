@@ -1001,6 +1001,20 @@ void tui_run(TuiApp *app){
      *   notcurses_get 负责把转义序列解码为 NCKEY_* 常量, tui_handle_input 才能识别.
      */
     while(a->running){
+        /* ── 首先检查是否需要重绘 (渲染必须在获取输入之前,
+         *    否则 F5-F10 等热键执行 continue 后会被 notcurses_get 阻塞) ── */
+        if(a->need_render || a->popup_dirty){
+            if(a->need_render){
+                tui_render_all(a);
+                a->need_render = 0;
+            }
+            if(a->popup_active && a->popup_dirty){
+                render_popup(a);
+                a->popup_dirty = 0;
+                notcurses_render(a->nc);
+            }
+        }
+
         /* ── 获取输入 ── */
         memset(&ni,0,sizeof(ni));
         uint32_t code = notcurses_get(a->nc, NULL, &ni);
@@ -1014,6 +1028,43 @@ void tui_run(TuiApp *app){
             select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
         }else{
             /* ── 有按键 → 分发处理 ── */
+
+            /* 调试热键 F5-F10: 弹窗和非弹窗模式下都可用 (仅在 attach 后) */
+            if(a->debug && a->debug->attached &&
+               !quit_confirm &&
+               !a->pid_input_active && !a->search_input_active){
+                if(code == NCKEY_F05){
+                    debug_continue(a->debug);
+                    if(a->adb) db_insert_reg_snapshot(a->adb,a->debug,db_snapshot_count(a->adb));
+                    a->need_render = 1; continue;
+                }
+                if(code == NCKEY_F07){
+                    debug_step(a->debug);
+                    if(a->adb) db_insert_reg_snapshot(a->adb,a->debug,db_snapshot_count(a->adb));
+                    a->need_render = 1; continue;
+                }
+                if(code == NCKEY_F08){
+                    debug_step_over(a->debug);
+                    if(a->adb) db_insert_reg_snapshot(a->adb,a->debug,db_snapshot_count(a->adb));
+                    a->need_render = 1; continue;
+                }
+                if(code == NCKEY_F09){
+                    debug_set_breakpoint(a->debug, a->debug->regs.rip);
+                    a->need_render = 1; continue;
+                }
+                if(code == NCKEY_F10){
+                    debug_detach(a->debug); debug_free(a->debug); a->debug = NULL;
+                    if(a->middle_data.fields){fields_free(a->middle_data.fields,a->middle_data.count);
+                        a->middle_data.fields=NULL;a->middle_data.count=0;a->middle_data.capacity=0;
+                        a->middle_data.cursor=0;a->middle_data.scroll=0;}
+                    if(a->right_data.fields){fields_free(a->right_data.fields,a->right_data.count);
+                        a->right_data.fields=NULL;a->right_data.count=0;a->right_data.capacity=0;
+                        a->right_data.cursor=0;a->right_data.scroll=0;a->right_data.scroll_x=0;}
+                    a->popup_active = 0; a->active_panel = PANEL_LEFT;
+                    a->need_render = 1; continue;
+                }
+            }
+
             if(a->popup_active){
                 /* 退出确认弹窗: 仅接受 y(确认) / n(取消) */
                 if(quit_confirm){
@@ -1066,19 +1117,6 @@ void tui_run(TuiApp *app){
                     /* 所有其他按键 → 统一输入处理 */
                     tui_handle_input(a, &ni);
                 }
-            }
-        }
-
-        /* ── 检查是否需要重绘 (状态可能被按键处理改变) ── */
-        if(a->need_render || a->popup_dirty){
-            if(a->need_render){
-                tui_render_all(a);
-                a->need_render = 0;
-            }
-            if(a->popup_active && a->popup_dirty){
-                render_popup(a);
-                a->popup_dirty = 0;
-                notcurses_render(a->nc);
             }
         }
     }

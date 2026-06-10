@@ -483,8 +483,7 @@ int tui_handle_input(TuiApp *app, const struct ncinput *ni){
                     di == BTN_DATAFLOW || di == BTN_DATAFLOW_INTER ||
                     di == BTN_PTTRACE || di == BTN_HEAPTRACE ||
                     di == BTN_HEAPREPLAY ||
-                    di == BTN_BINDIFF || di == BTN_SYMBOLIC ||
-                    di == BTN_DECOMPILE)){
+                    di == BTN_BINDIFF || di == BTN_SYMBOLIC)){
                     /* 保存当前活动面板, 按钮 action 不应跳转焦点 */
                     ActivePanel saved = app->active_panel;
                     btn_dispatch(app, sel->detail_index);
@@ -652,12 +651,35 @@ int tui_handle_input(TuiApp *app, const struct ncinput *ni){
                    (strstr(app->middle_data.fields[0].text, "Memory Map") ||
                     (strstr(app->middle_data.fields[0].text, "Regs") &&
                      msel->text && strstr(msel->text, "-> ")))){
-                    /* 寄存器区域标注 → 读整个段, 高亮寄存器值所在行 */
+                    /*
+                     * VMMap / Regs 内存区域 → 右面板 hexdump
+                     *
+                     * 两种行格式:
+                     *   VMMap: "[N] 0x555000-0x556000  8.0KB r-xp  ls"
+                     *   Regs:  "  RIP=0x7f00 -> libc 0x7f00-0x7f80"
+                     *
+                     * VMMap: 直接解析 0xSTART-0xEND, 从段首开始 dump
+                     * Regs:  提取寄存器值(rv)和段范围, 以 rv 为中心 dump
+                     */
+                    int is_vmmap = strstr(app->middle_data.fields[0].text, "Memory Map") != NULL;
                     uint64_t rv=0, seg_start=0, seg_end=0;
-                    const char *p_rv = strstr(msel->text, "0x");
-                    if(p_rv) rv = strtoull(p_rv, NULL, 16);
-                    const char *p_seg = p_rv ? strstr(p_rv+2, "0x") : NULL;
-                    if(p_seg) sscanf(p_seg, "0x%lx-0x%lx", &seg_start, &seg_end);
+
+                    if (is_vmmap && msel->text) {
+                        /* VMMap 行: strstr 定位第一个 "0x", 然后一次性解析完整范围.
+                         * 不能用 %*[^0] — 行首 "[0]" 中的 "0" 会干扰匹配. */
+                        const char *p = strstr(msel->text, "0x");
+                        if (p) sscanf(p, "0x%lx-0x%lx",
+                                      &seg_start, &seg_end);
+                        rv = seg_start;  /* 从段首开始显示 */
+                    } else {
+                        /* Regs 行: 保留原有解析逻辑 */
+                        const char *p_rv = strstr(msel->text, "0x");
+                        if(p_rv) rv = strtoull(p_rv, NULL, 16);
+                        const char *p_seg = p_rv ? strstr(p_rv+2, "0x") : NULL;
+                        if(p_seg) sscanf(p_seg, "0x%lx-0x%lx",
+                                         &seg_start, &seg_end);
+                    }
+
                     if(rv>0x1000 && app->debug && app->debug->attached){
                         if(app->right_data.fields){
                             fields_free(app->right_data.fields,app->right_data.count);
@@ -665,32 +687,47 @@ int tui_handle_input(TuiApp *app, const struct ncinput *ni){
                             app->right_data.capacity=0;app->right_data.cursor=0;
                             app->right_data.scroll=0;app->right_data.scroll_x=0;
                         }
-                        /* 读段内容, 以 rv 为中心, 最多 4096 字节 */
+                        /* 读段内容, 最多 4096 字节 */
                         uint64_t seg_size = (seg_end > seg_start) ? (seg_end - seg_start) : 0;
-                        uint64_t dump_start, dump_size;
-                        if (seg_size > 0 && seg_size <= 4096) {
-                            dump_start = seg_start; dump_size = seg_size;
-                        } else {
-                            dump_size = 4096;
-                            dump_start = (rv > dump_size/2) ? (rv - dump_size/2) : seg_start;
-                            if (dump_start < seg_start) dump_start = seg_start;
+                        uint64_t dump_start = seg_start;
+                        uint64_t dump_size  = (seg_size > 0 && seg_size <= 4096)
+                                              ? seg_size : 4096;
+                        /* VMMap: 始终从段首开始; Regs: 以 rv 为中心 */
+                        if (!is_vmmap && seg_size > 4096) {
+                            dump_start = (rv > dump_size/2)
+                                         ? (rv - dump_size/2) : seg_start;
+                            if (dump_start < seg_start)
+                                dump_start = seg_start;
                         }
                         uint8_t *mem = malloc((size_t)dump_size);
-                        int nr = mem ? debug_readmem(app->debug, dump_start, mem, (size_t)dump_size) : -1;
+                        int nr = mem ? debug_readmem(app->debug, dump_start,
+                                                     mem, (size_t)dump_size) : -1;
                         if(nr > 0){
                             char buf[256];
-                            snprintf(buf,sizeof(buf),"=== Hexdump 0x%lx-0x%lx (%d bytes) ===",
-                                     (unsigned long)dump_start,(unsigned long)(dump_start+nr),nr);
+                            snprintf(buf,sizeof(buf),
+                                     "=== Hexdump 0x%lx-0x%lx (%d bytes) ===",
+                                     (unsigned long)dump_start,
+                                     (unsigned long)(dump_start+nr),nr);
                             fields_add(&app->right_data,buf,0,0,DETAIL_NONE,-1);
-                            snprintf(buf,sizeof(buf),"RIP=0x%lx  seg:0x%lx-0x%lx  ▶=cursor",
-                                     (unsigned long)rv,(unsigned long)seg_start,(unsigned long)seg_end);
+                            if (is_vmmap) {
+                                snprintf(buf,sizeof(buf),
+                                         "Segment: 0x%lx-0x%lx  (%lu KB)",
+                                         (unsigned long)seg_start,
+                                         (unsigned long)seg_end,
+                                         (unsigned long)(seg_size/1024));
+                            } else {
+                                snprintf(buf,sizeof(buf),
+                                         "RIP=0x%lx  seg:0x%lx-0x%lx  ▶=cursor",
+                                         (unsigned long)rv,
+                                         (unsigned long)seg_start,
+                                         (unsigned long)seg_end);
+                            }
                             fields_add(&app->right_data,buf,1,0,DETAIL_NONE,-1);
                             char hx[128];
-                            int hl_line = -1;  /* 高亮行索引 (寄存器值所在行) */
-                            int line_idx = app->right_data.count; /* 首行索引 */
+                            int hl_line = -1;
+                            int line_idx = app->right_data.count;
                             for(int off=0;off<nr;off+=16){
                                 uint64_t line_addr = dump_start + off;
-                                /* 此行是否包含寄存器值? */
                                 int hl = (rv >= line_addr && rv < line_addr + 16);
                                 if (hl) hl_line = line_idx;
                                 int hp=0;
@@ -705,17 +742,14 @@ int tui_handle_input(TuiApp *app, const struct ncinput *ni){
                                     uint8_t c=mem[off+b];
                                     hp+=snprintf(hx+hp,sizeof(hx)-hp,"%c",(c>=32&&c<127)?(char)c:'.');
                                 }
-                                /* 高亮行: selectable=1 → region_lines 黄色前景 */
                                 fields_add(&app->right_data,hx,1,hl?1:0,DETAIL_NONE,-1);
                                 line_idx++;
                             }
-                            /* 自动滚动: 高亮行居中于右面板视口 */
                             if (hl_line >= 0) {
                                 app->right_data.cursor = hl_line;
-                                /* 计算可视行数: 面板高度 - 2 (边框) */
                                 unsigned ty; ncplane_dim_yx(
                                     notcurses_stdplane(app->nc), &ty, NULL);
-                                int vis = (int)(ty * 50 / 100) - 2; /* 右面板=50% */
+                                int vis = (int)(ty * 50 / 100) - 2;
                                 if (vis < 4) vis = 4;
                                 app->right_data.scroll = hl_line - vis/2;
                                 if (app->right_data.scroll < 0) app->right_data.scroll = 0;
@@ -724,26 +758,6 @@ int tui_handle_input(TuiApp *app, const struct ncinput *ni){
                         free(mem);
                     }
                     app->need_render = 1; return 1;
-                }else if(msel && msel->selectable && app->middle_data.count > 0 &&
-                   strstr(app->middle_data.fields[0].text, "Decompile")){
-                    /* Decompile: 函数列表 → Enter → 反编译到右面板 */
-                    uint64_t addr = 0;
-                    if (msel->text) {
-                        const char *p = strstr(msel->text, "0x");
-                        if (p) addr = strtoull(p, NULL, 16);
-                    }
-                    if (addr > 0x1000 && app->adb && !app->db_importing) {
-                        if (app->right_data.fields) {
-                            fields_free(app->right_data.fields, app->right_data.count);
-                            app->right_data.fields = NULL; app->right_data.count = 0;
-                            app->right_data.capacity = 0; app->right_data.cursor = 0;
-                            app->right_data.scroll = 0; app->right_data.scroll_x = 0;
-                        }
-                        decompile_function_at(addr, &app->right_data);
-                        if (app->right_data.count > 0)
-                            app->active_panel = PANEL_RIGHT;
-                        app->need_render = 1; return 1;
-                    }
                 }else if(msel && msel->selectable && app->middle_data.count > 0 &&
                    app->middle_data.fields[0].text &&
                    strstr(app->middle_data.fields[0].text, "Runtime Symbol")){

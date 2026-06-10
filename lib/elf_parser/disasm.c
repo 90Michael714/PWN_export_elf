@@ -13,13 +13,15 @@
  */
 #include "disasm.h"
 #include "elf_parser.h"
+#include "core/db.h"
 
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <sqlite3.h>
 
-/* 自然语言翻译 (translate_insn.c 提供) */
-extern int translate_insn(const struct cs_insn *insn, char *buf, size_t bufsz);
+/* 全局 DB 句柄 (tui_create 中设置) */
+extern AnalysisDB *g_active_db;
 
 /* ================================================================== */
 /* 内部结构                                                           */
@@ -159,6 +161,9 @@ unsigned int disasm_version(void)
 /**
  * 反汇编指定的代码节, 以 PanelData 行输出。
  *
+ * DB 优先: 如果 instructions 表已有数据 → 直接从 SQLite 读 (毫秒级)。
+ * Capstone 降级: DB 不可用或节数据缺失 → 实时反汇编 (首次打开场景)。
+ *
  * 用法: 用户在左侧面板选中 .text 节 → 按 Enter → 调用 parse_disasm
  * 每行格式: "  ADDR:  HEX_BYTES  MNEMONIC  OPERANDS"
  */
@@ -179,7 +184,61 @@ int parse_disasm(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
              sec_name ? sec_name : "?");
     fields_add(pd, title, 0, 0, DETAIL_NONE, -1);
 
-    /* 创建反汇编引擎 */
+    /* ═══════════════════════════════════════════════════════
+     * 路径 1: DB 可用 → 从 instructions 表直接读 (首选)
+     * ═══════════════════════════════════════════════════════ */
+    if (g_active_db && sec_name) {
+        sqlite3 *c = (sqlite3 *)db_conn(g_active_db);
+        if (c) {
+            sqlite3_stmt *st = NULL;
+            sqlite3_prepare_v2(c,
+                "SELECT address, bytes, mnemonic, op_str FROM instructions "
+                "WHERE section=?1 ORDER BY address",
+                -1, &st, NULL);
+            if (st) {
+                sqlite3_bind_text(st, 1, sec_name, -1, SQLITE_STATIC);
+                int count = 0;
+                if (sqlite3_step(st) == SQLITE_ROW) {
+                    /* 有数据 → 走 DB 路径 */
+                    char buf[256];
+                    do {
+                        uint64_t addr = (uint64_t)sqlite3_column_int64(st, 0);
+                        const uint8_t *bytes =
+                            (const uint8_t *)sqlite3_column_blob(st, 1);
+                        int blen = sqlite3_column_bytes(st, 1);
+                        const char *mnem =
+                            (const char *)sqlite3_column_text(st, 2);
+                        const char *op =
+                            (const char *)sqlite3_column_text(st, 3);
+
+                        /* hex bytes */
+                        char hex[48] = "";
+                        int hpos = 0;
+                        for (int i = 0; i < blen && hpos < (int)sizeof(hex) - 4; i++)
+                            hpos += snprintf(hex + hpos,
+                                             sizeof(hex) - (size_t)hpos,
+                                             "%02x ", bytes[i]);
+
+                        snprintf(buf, sizeof(buf),
+                                 "  0x%lx:  %-24s  %-8s %s",
+                                 (unsigned long)addr, hex,
+                                 mnem ? mnem : "?", op ? op : "");
+                        fields_add(pd, buf, 1, 1, DETAIL_NONE,
+                                   (int)(addr & 0xFFFF));
+                        count++;
+                    } while (sqlite3_step(st) == SQLITE_ROW);
+
+                    sqlite3_finalize(st);
+                    return pd->count;
+                }
+                sqlite3_finalize(st);
+            }
+        }
+    }
+
+    /* ═══════════════════════════════════════════════════════
+     * 路径 2: DB 不可用 → Capstone 实时反汇编 (降级)
+     * ═══════════════════════════════════════════════════════ */
     disasm_ctx *d = disasm_open();
     if (!d) {
         fields_add(pd, "(disasm: Capstone init failed)", 0, 0, DETAIL_NONE, -1);
@@ -189,7 +248,6 @@ int parse_disasm(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
     const uint8_t *code = ctx->map + sh->sh_offset;
     size_t         size = sh->sh_size;
     uint64_t       addr = sh->sh_addr;
-    int            count = 0;
 
     char buf[256];
     while (size > 0 && disasm_next(d, &code, &size, &addr)) {
@@ -203,20 +261,14 @@ int parse_disasm(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
                              "%02x ", insn->bytes[i]);
         }
 
-        /* 指令翻译: 匹配规则, 追加自然语言解释 */
-        char trans[128];
-        translate_insn(insn, trans, sizeof(trans));
-
         snprintf(buf, sizeof(buf),
-                 "  0x%lx:  %-24s  %-8s %-36s %s",
+                 "  0x%lx:  %-24s  %-8s %s",
                  (unsigned long)insn->address,
                  hex,
                  insn->mnemonic,
-                 insn->op_str,
-                 trans);
+                 insn->op_str);
 
         fields_add(pd, buf, 1, 1, DETAIL_NONE, (int)(insn->address & 0xFFFF));
-        count++;
     }
 
     disasm_close(d);

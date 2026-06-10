@@ -70,7 +70,6 @@ set(ELF_PARSER_SOURCES
     lib/elf_parser/dataflow.c
     lib/elf_parser/dataflow_inter.c
     lib/elf_parser/trace_view.c
-    lib/elf_parser/decompile.c
 )
 
 # Core 源文件 (Worker 线程池 + 结果缓存)

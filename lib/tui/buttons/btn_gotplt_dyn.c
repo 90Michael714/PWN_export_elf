@@ -139,7 +139,7 @@ int btn_gotplt_dyn_action(TuiApp *app)
     }
 
     /* ── 5. 标题 ──────────────────────────────────────────── */
-    char buf[384];
+    char buf[512];
     int gc = (int)(got_sec->sh_size / sizeof(Elf64_Addr));
     dyn_got_gc = gc;
 
@@ -158,25 +158,25 @@ int btn_gotplt_dyn_action(TuiApp *app)
     fields_add(&app->middle_data, buf, 0, 0, DETAIL_NONE, -1);
     snprintf(buf, sizeof(buf), "GOT@0x%lx (%d slots)  [Enter]=detail  [h]=back",
              (unsigned long)dyn_got_runtime, gc);
-    fields_add(&app->middle_data, buf, 1, 0, DETAIL_NONE, -1);
+    fields_add(&app->middle_data, buf, 0, 0, DETAIL_NONE, -1);
 
     /* ── 6. GOT[0..2] Reserved ──────────────────────────────── */
-    fields_add(&app->middle_data, "", 0, 0, DETAIL_NONE, -1);
-    fields_add(&app->middle_data, "─── Reserved ───", 1, 0, DETAIL_NONE, -1);
+    fields_add(&app->middle_data, "─── Reserved ───", 0, 0, DETAIL_NONE, -1);
     const char *rd[] = {"[_DYNAMIC]", "[link_map]", "[_dl_runtime_resolve]"};
     for (int i = 0; i < 3 && i < gc; i++) {
         uint64_t ga = dyn_got_runtime + (uint64_t)(i * sizeof(Elf64_Addr));
         uint64_t val = 0;
         debug_readmem(app->debug, ga, &val, sizeof(val));
         char lib[64]; resolve_lib(val, lib, sizeof(lib));
-        snprintf(buf, sizeof(buf), "GOT[%d] %s  %s  0x%lx -> 0x%lx",
+        snprintf(buf, sizeof(buf),
+            "GOT[%d]  %-32s  %-24s  0x%016lx  0x%016lx",
             i, rd[i], lib, (unsigned long)ga, (unsigned long)val);
-        fields_add(&app->middle_data, buf, 1, 1, DETAIL_NONE, (int)(ga & 0xFFFF));
+        fields_add(&app->middle_data, buf, 0, 1, DETAIL_NONE, (int)(ga & 0xFFFF));
     }
 
     /* ── 7. Imported Functions ─────────────────────────────── */
-    fields_add(&app->middle_data, "", 0, 0, DETAIL_NONE, -1);
-    fields_add(&app->middle_data, "─── Imported Functions ───", 1, 0, DETAIL_NONE, -1);
+    if (gc > 3)
+        fields_add(&app->middle_data, "", 0, 0, DETAIL_NONE, -1);
 
     int resolved = 0, lazy = 0;
     for (int i = 3; i < gc; i++) {
@@ -190,34 +190,32 @@ int btn_gotplt_dyn_action(TuiApp *app)
         for (int s = 0; s < dyn_nslots; s++)
             if (dyn_slots[s].addr == file_ga) { sn = dyn_slots[s].name; break; }
 
-        char lib[64]; const char *state;
-        if (val == 0) {
-            snprintf(lib, sizeof(lib), "-"); state = "(lazy)"; lazy++;
-        } else if (val < 0x1000) {
-            snprintf(lib, sizeof(lib), "-"); state = "(lazy)"; lazy++;
+        /* 库名 + 状态 */
+        char lib[64];
+        if (val == 0 || val < 0x1000) {
+            snprintf(lib, sizeof(lib), "(lazy)"); lazy++;
         } else {
-            resolve_lib(val, lib, sizeof(lib));
-            snprintf(buf, sizeof(buf), " (resolved)");
-            state = ""; resolved++;
+            resolve_lib(val, lib, sizeof(lib)); resolved++;
         }
 
-        snprintf(buf, sizeof(buf), "GOT[%d] %s  %s  0x%lx -> 0x%lx%s",
-            i, sn, lib, (unsigned long)ga, (unsigned long)val, state);
-        fields_add(&app->middle_data, buf, 1, 1, DETAIL_NONE, (int)(ga & 0xFFFF));
+        snprintf(buf, sizeof(buf),
+            "GOT[%d]  %-32s  %-24s  0x%016lx  0x%016lx",
+            i, sn, lib, (unsigned long)ga, (unsigned long)val);
+        fields_add(&app->middle_data, buf, 0, 1, DETAIL_NONE, (int)(ga & 0xFFFF));
     }
 
     /* ── 8. 摘要 ──────────────────────────────────────────── */
     fields_add(&app->middle_data, "", 0, 0, DETAIL_NONE, -1);
-    snprintf(buf, sizeof(buf), "── %d imports, %d resolved, %d lazy",
-             gc - 3, resolved, lazy);
-    fields_add(&app->middle_data, buf, 1, 0, DETAIL_NONE, -1);
+    snprintf(buf, sizeof(buf), "── %d imports, %d resolved, %d lazy  |  RELRO: %s",
+             gc - 3, resolved, lazy, rs);
+    fields_add(&app->middle_data, buf, 0, 0, DETAIL_NONE, -1);
     if (resolved > 0)
         fields_add(&app->middle_data,
-            "  Resolved values leak libc/ld base for ASLR bypass",
-            1, 0, DETAIL_NONE, -1);
+            "Resolved values leak libc/ld base for ASLR bypass",
+            0, 0, DETAIL_NONE, -1);
     if (!is_partial && !relro_full)
         fields_add(&app->middle_data,
-            "  ⚠ No RELRO — GOT overwrite trivial", 1, 0, DETAIL_NONE, -1);
+            "⚠ No RELRO — GOT overwrite trivial", 0, 0, DETAIL_NONE, -1);
 
     if (app->middle_data.count > 0) app->active_panel = PANEL_MIDDLE;
     app->need_render = 1;
@@ -231,11 +229,14 @@ int dyn_gotplt_show_detail(TuiApp *app, const char *line)
 {
     if (!app || !app->debug || !line) return -1;
 
-    /* 解析 "symbol  lib  GOT[N] 0xGOT_ADDR -> 0xVAL" */
-    uint64_t got_addr = 0, val = 0;
+    /* 解析新列格式: "GOT[N]  Symbol  Library  0xGOT_ADDR  0xVAL"
+     * 用 strstr 定位两个 0x 地址 */
     const char *p = strstr(line, "0x");
-    if (!p || sscanf(p, "0x%lx -> 0x%lx", &got_addr, &val) < 2)
-        return -1;
+    if (!p) return -1;
+    uint64_t got_addr = strtoull(p, NULL, 16);
+    p = strstr(p + 2, "0x");
+    if (!p) return -1;
+    uint64_t val = strtoull(p, NULL, 16);
     if (!got_addr) return -1;
 
     /* 清空右面板 */

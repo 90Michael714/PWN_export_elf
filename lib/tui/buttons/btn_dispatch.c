@@ -52,7 +52,6 @@ int btn_dispatch(TuiApp *app, int detail_index)
         case BTN_HEAPREPLAY:      return btn_heapreplay_action(app);
         case BTN_BINDIFF:         return btn_bindiff_action(app);
         case BTN_SYMBOLIC:        return btn_symbolic_action(app);
-        case BTN_DECOMPILE:       return btn_decompile_action(app);
 
         /* ── 纯转发按钮 → btn_common.c 注册表 ── */
         default: {
