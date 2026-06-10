@@ -483,7 +483,8 @@ int tui_handle_input(TuiApp *app, const struct ncinput *ni){
                     di == BTN_DATAFLOW || di == BTN_DATAFLOW_INTER ||
                     di == BTN_PTTRACE || di == BTN_HEAPTRACE ||
                     di == BTN_HEAPREPLAY ||
-                    di == BTN_BINDIFF || di == BTN_SYMBOLIC)){
+                    di == BTN_BINDIFF || di == BTN_SYMBOLIC ||
+                    di == BTN_DECOMPILE)){
                     /* 保存当前活动面板, 按钮 action 不应跳转焦点 */
                     ActivePanel saved = app->active_panel;
                     btn_dispatch(app, sel->detail_index);
@@ -644,6 +645,29 @@ int tui_handle_input(TuiApp *app, const struct ncinput *ni){
                             app->right_data.scroll=0;app->right_data.scroll_x=0;
                         }
                         db_vuln_detail(app->adb,addr,&app->right_data);
+                        if(app->right_data.count>0)app->active_panel=PANEL_RIGHT;
+                    }
+                    app->need_render=1;return 1;
+                }else if(msel && msel->selectable && app->middle_data.count > 0 &&
+                   strstr(app->middle_data.fields[0].text, "Decompile")){
+                    /* Decompile 函数列表 → Enter → 右面板 C伪代码 */
+                    uint64_t addr = 0;
+                    if(msel->detail_index != -1)
+                        addr = (uint64_t)(msel->detail_index & 0x7FFFFFFF);
+                    if(!addr && msel->text){
+                        const char *p=strstr(msel->text,"0x");
+                        if(p)addr=strtoull(p,NULL,16);
+                    }
+                    if(addr > 0x100 && app->adb && !app->db_importing){
+                        if(app->right_data.fields){
+                            fields_free(app->right_data.fields,app->right_data.count);
+                            app->right_data.fields=NULL;app->right_data.count=0;
+                            app->right_data.capacity=0;app->right_data.cursor=0;
+                            app->right_data.scroll=0;app->right_data.scroll_x=0;
+                        }
+                        extern AnalysisDB *g_active_db;
+                        g_active_db = app->adb;
+                        decompile_function_at(addr, &app->right_data);
                         if(app->right_data.count>0)app->active_panel=PANEL_RIGHT;
                     }
                     app->need_render=1;return 1;

@@ -74,6 +74,214 @@ typedef struct {
 } operand_t;
 
 /* ================================================================== */
+/* 跨节地址解析引擎 (v4: address-centric cross-section correlation)     */
+/*                                                                     */
+/* 以地址为核心, 关联多个节的信息:                                       */
+/*   .rodata  → 字符串常量                                             */
+/*   .data    → 已初始化全局变量                                        */
+/*   .bss     → 未初始化全局变量                                        */
+/*   .plt     → PLT 存根 → .rela.plt → .dynsym → 外部函数名             */
+/*   .got.plt → 懒绑定地址槽                                            */
+/*   .symtab  → 静态符号 (函数名 / 变量名)                               */
+/*   .dynsym  → 动态符号                                                */
+/*   .rela.*  → 重定位条目 (外部符号/全局变量)                            */
+/* ================================================================== */
+
+/*
+ * addr_section_context — 查询地址所属的节
+ *
+ * 返回节名称(.text/.rodata/.data等)和类型,
+ * 写入 name/type 缓冲区。0=成功, -1=不在任何已知节中。
+ */
+static int addr_section_context(sqlite3 *c, uint64_t addr,
+                                 char *name, size_t nsz,
+                                 char *type, size_t tsz)
+{
+    if (!c) { if (nsz) name[0]='\0'; if (tsz) type[0]='\0'; return -1; }
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(c,
+        "SELECT name, type FROM sections "
+        "WHERE addr <= ?1 AND (?1 - addr) < size "
+        "ORDER BY addr DESC LIMIT 1",
+        -1, &st, NULL);
+    if (!st) return -1;
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)addr);
+    int rc = -1;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const char *n = (const char *)sqlite3_column_text(st, 0);
+        const char *t = (const char *)sqlite3_column_text(st, 1);
+        if (n && nsz) { snprintf(name, nsz, "%s", n); rc = 0; }
+        else if (nsz)   name[0] = '\0';
+        if (t && tsz) { snprintf(type, tsz, "%s", t); }
+        else if (tsz)   type[0] = '\0';
+    }
+    sqlite3_finalize(st);
+    return rc;
+}
+
+/*
+ * resolve_string_ref — 检查地址是否引用 .rodata 中的字符串
+ *
+ * 如果 addr 落在 .rodata 范围, 从 strings 表读取字符串值,
+ * 写入 out (最多 sz 字节)。返回 0=是字符串, -1=否。
+ */
+static int resolve_string_ref(sqlite3 *c, uint64_t addr,
+                               char *out, size_t sz)
+{
+    if (!c || addr < 0x1000) { if (sz) out[0]='\0'; return -1; }
+
+    /* 1. 检查是否是已知字符串地址 */
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(c,
+        "SELECT value FROM strings WHERE address=?1 LIMIT 1",
+        -1, &st, NULL);
+    if (st) {
+        sqlite3_bind_int64(st, 1, (sqlite3_int64)addr);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            const char *v = (const char *)sqlite3_column_text(st, 0);
+            if (v && v[0]) {
+                /* 转义换行和引号 */
+                int pos = 0;
+                out[pos++] = '"';
+                for (const char *p = v; *p && pos < (int)sz - 4; p++) {
+                    if (*p == '\n')      { out[pos++]='\\'; out[pos++]='n'; }
+                    else if (*p == '\r') { out[pos++]='\\'; out[pos++]='r'; }
+                    else if (*p == '\t') { out[pos++]='\\'; out[pos++]='t'; }
+                    else if (*p == '"')  { out[pos++]='\\'; out[pos++]='"'; }
+                    else if (*p == '\\') { out[pos++]='\\'; out[pos++]='\\'; }
+                    else if ((unsigned char)*p >= 32) out[pos++] = *p;
+                }
+                out[pos++] = '"';
+                out[pos] = '\0';
+                sqlite3_finalize(st);
+                return 0;
+            }
+        }
+        sqlite3_finalize(st);
+    }
+
+    /* 2. 检查地址是否在 .rodata 范围内 (可能不在 strings 表中) */
+    char sec_name[64] = "", sec_type[32] = "";
+    if (addr_section_context(c, addr, sec_name, sizeof(sec_name),
+                              sec_type, sizeof(sec_type)) == 0) {
+        if (sec_name[0] && (strstr(sec_name, "rodata") ||
+            strstr(sec_name, "rdata") || strstr(sec_name, "str"))) {
+            /* 读取原始字节并尝试解释为字符串 */
+            sqlite3_stmt *rd = NULL;
+            sqlite3_prepare_v2(c,
+                "SELECT substr(data,?2,?3) FROM sections "
+                "JOIN (SELECT value as data FROM _meta WHERE key='elf_bytes') "
+                "WHERE name=?1",
+                -1, &rd, NULL);
+            if (rd) {
+                /* 降级方案: 仅标记为可能的字符串 */
+                sqlite3_finalize(rd);
+            }
+            /* 标记为 rodata 引用 */
+            snprintf(out, sz, "/* @%s */", sec_name);
+            return 0;
+        }
+    }
+
+    if (sz) out[0] = '\0';
+    return -1;
+}
+
+/*
+ * resolve_global_var — 检查地址是否引用 .data/.bss 中的全局变量
+ *
+ * 通过 symbols 表查找符号名, 通过 rela.dyn 查找外部变量名。
+ * 返回 0=找到, -1=未找到。
+ */
+static int resolve_global_var(sqlite3 *c, uint64_t addr,
+                               char *name, size_t nsz,
+                               char *type_hint, size_t tsz)
+{
+    if (!c || addr < 0x1000) goto not_found;
+
+    /* 1. 在 symbols 表中查找 (静态变量) */
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(c,
+        "SELECT name, type FROM symbols WHERE address=?1 LIMIT 1",
+        -1, &st, NULL);
+    if (st) {
+        sqlite3_bind_int64(st, 1, (sqlite3_int64)addr);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            const char *n = (const char *)sqlite3_column_text(st, 0);
+            const char *t = (const char *)sqlite3_column_text(st, 1);
+            if (n && nsz) snprintf(name, nsz, "%s", n);
+            if (t && !strcmp(t, "OBJECT") && tsz) snprintf(type_hint, tsz, "global");
+            else if (t && tsz) snprintf(type_hint, tsz, "%s", t);
+            sqlite3_finalize(st);
+            return 0;
+        }
+        sqlite3_finalize(st);
+    }
+
+    /* 2. 检查节上下文确认是数据区 */
+    {
+        char sec[64] = "", sty[32] = "";
+        if (addr_section_context(c, addr, sec, sizeof(sec), sty, sizeof(sty)) == 0) {
+            if (strstr(sec, "data") || strstr(sec, "bss") ||
+                strstr(sec, "got")) {
+                if (nsz) snprintf(name, nsz, "data_%lx", (unsigned long)addr);
+                if (tsz) snprintf(type_hint, tsz, "%s", sec);
+                return 0;
+            }
+        }
+    }
+
+not_found:
+    if (nsz) name[0] = '\0';
+    if (tsz) type_hint[0] = '\0';
+    return -1;
+}
+
+/*
+ * resolve_plt_target — 解析 PLT/GOT 间接调用的目标函数名
+ *
+ * 链路: got_addr → .rela.plt (r_offset=got_addr) → r_info → .dynsym → .dynstr
+ * 返回 0=找到函数名, -1=未找到。
+ */
+static int resolve_plt_target(sqlite3 *c, uint64_t got_addr,
+                               char *name, size_t sz)
+{
+    if (!c || got_addr < 0x1000) return -1;
+
+    /* 在 symbols 中查找 GOT 条目对应的函数 (已由 db_import 预处理) */
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(c,
+        "SELECT s2.name FROM symbols s1 "
+        "JOIN xrefs x ON x.from_addr=s1.address "
+        "JOIN symbols s2 ON s2.address=x.to_addr "
+        "WHERE s1.address=?1 AND s2.type='FUNC' "
+        "AND s1.table_name LIKE '%got%' LIMIT 1",
+        -1, &st, NULL);
+    if (st) {
+        sqlite3_bind_int64(st, 1, (sqlite3_int64)got_addr);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            const char *n = (const char *)sqlite3_column_text(st, 0);
+            if (n && n[0]) { snprintf(name, sz, "%s", n); sqlite3_finalize(st); return 0; }
+        }
+        sqlite3_finalize(st);
+    }
+
+    /* 备用: 直接查 symbols 表中该地址的符号名 */
+    sqlite3_prepare_v2(c,
+        "SELECT name FROM symbols WHERE address=?1 LIMIT 1",
+        -1, &st, NULL);
+    if (st) {
+        sqlite3_bind_int64(st, 1, (sqlite3_int64)got_addr);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            const char *n = (const char *)sqlite3_column_text(st, 0);
+            if (n && n[0]) { snprintf(name, sz, "%s", n); sqlite3_finalize(st); return 0; }
+        }
+        sqlite3_finalize(st);
+    }
+    return -1;
+}
+
+/* ================================================================== */
 /* Phase 1: 从 ir_stmts 构建变量映射                                    */
 /* ================================================================== */
 
@@ -393,16 +601,57 @@ static void classify_operand(sqlite3 *c, uint64_t insn_addr,
         else
             out->imm_val = (int64_t)strtoull(s, NULL, 10);
         if (neg) out->imm_val = -out->imm_val;
-        /* 尝试符号解析 (仅地址级立即数) */
+
+        /* v4: 跨节地址解析链
+         *  1. 是否是 .rodata 字符串?
+         *  2. 是否是 .data/.bss 全局变量?
+         *  3. 是否是 PLT/GOT 间接跳转目标?
+         *  4. 是否是已知符号 (函数/变量)?
+         */
         if (out->imm_val > 0x1000 && (uint64_t)out->imm_val < 0x7FFFFFFFFFFFULL) {
+            char resolved[128] = "";
+
+            /* 优先级 1: 字符串引用 (.rodata) */
+            if (resolve_string_ref(c, (uint64_t)out->imm_val, resolved, sizeof(resolved)) == 0
+                && resolved[0]) {
+                snprintf(out->name, sizeof(out->name), "%s", resolved);
+                return;
+            }
+
+            /* 优先级 2: 全局变量 (.data/.bss) */
+            char gvar_name[64] = "", gvar_type[32] = "";
+            if (resolve_global_var(c, (uint64_t)out->imm_val,
+                                    gvar_name, sizeof(gvar_name),
+                                    gvar_type, sizeof(gvar_type)) == 0) {
+                if (gvar_type[0])
+                    snprintf(out->name, sizeof(out->name), "/*%s*/ %s", gvar_type, gvar_name);
+                else
+                    snprintf(out->name, sizeof(out->name), "&%s", gvar_name);
+                return;
+            }
+
+            /* 优先级 3: PLT/GOT 目标 */
+            char plt_name[64] = "";
+            if (resolve_plt_target(c, (uint64_t)out->imm_val, plt_name, sizeof(plt_name)) == 0) {
+                snprintf(out->name, sizeof(out->name), "%s@PLT", plt_name);
+                return;
+            }
+
+            /* 优先级 4: 符号名 (函数/其他) */
             sqlite3_stmt *ss = NULL;
-            sqlite3_prepare_v2(c, "SELECT name FROM symbols WHERE address=?1 LIMIT 1",
+            sqlite3_prepare_v2(c, "SELECT name, type FROM symbols WHERE address=?1 LIMIT 1",
                                -1, &ss, NULL);
             if (ss) {
                 sqlite3_bind_int64(ss, 1, (sqlite3_int64)out->imm_val);
                 if (sqlite3_step(ss) == SQLITE_ROW) {
                     const char *sn = (const char *)sqlite3_column_text(ss, 0);
-                    if (sn) snprintf(out->name, sizeof(out->name), "&%s", sn);
+                    const char *st = (const char *)sqlite3_column_text(ss, 1);
+                    if (sn) {
+                        if (st && !strcmp(st, "FUNC"))
+                            snprintf(out->name, sizeof(out->name), "&%s", sn);
+                        else
+                            snprintf(out->name, sizeof(out->name), "&%s", sn);
+                    }
                 }
                 sqlite3_finalize(ss);
             }
@@ -534,6 +783,17 @@ static int output_decompiled(sqlite3 *c, uint64_t faddr, uint64_t fend,
         fields_add(pd, buf, 0, 0, DETAIL_NONE, -1);
     }
 
+    /* ── 节上下文 ── */
+    {
+        char sec_name[64] = "", sec_type[32] = "";
+        addr_section_context(c, faddr, sec_name, sizeof(sec_name),
+                              sec_type, sizeof(sec_type));
+        snprintf(buf, sizeof(buf), "  // section: %-20s  sz=0x%lx",
+                 sec_name[0] ? sec_name : "(unknown)",
+                 (unsigned long)(fend - faddr));
+        fields_add(pd, buf, 0, 0, DETAIL_NONE, -1);
+    }
+
     /* 栈帧大小 */
     {
         int frame_sz = 0;
@@ -555,9 +815,49 @@ static int output_decompiled(sqlite3 *c, uint64_t faddr, uint64_t fend,
             }
             sqlite3_finalize(fs);
         }
-        snprintf(buf, sizeof(buf), "  // stack: 0x%x, %d vars, %d args",
-                 frame_sz, nvars, nargs);
+        snprintf(buf, sizeof(buf), "  // stack: 0x%x, %d vars, %d args, %d calls",
+                 frame_sz, nvars, nargs, ncalls);
         fields_add(pd, buf, 0, 0, DETAIL_NONE, -1);
+    }
+
+    /* ── 引用的字符串常量 (.rodata 交叉引用) ── */
+    {
+        int str_shown = 0;
+        sqlite3_stmt *xr = NULL;
+        sqlite3_prepare_v2(c,
+            "SELECT x.from_addr, s.value FROM xrefs x "
+            "JOIN strings s ON s.address=x.to_addr "
+            "WHERE x.from_addr BETWEEN ?1 AND ?2 "
+            "AND (x.ref_type='data_read' OR x.ref_type='code_ref') "
+            "LIMIT 12",
+            -1, &xr, NULL);
+        if (xr) {
+            sqlite3_bind_int64(xr, 1, (sqlite3_int64)faddr);
+            sqlite3_bind_int64(xr, 2, (sqlite3_int64)fend);
+            while (sqlite3_step(xr) == SQLITE_ROW) {
+                uint64_t fa = (uint64_t)sqlite3_column_int64(xr, 0);
+                const char *sv = (const char *)sqlite3_column_text(xr, 1);
+                if (!str_shown) {
+                    fields_add(pd, "  // ── string refs (.rodata) ──", 0, 0, DETAIL_NONE, -1);
+                    str_shown = 1;
+                }
+                if (sv) {
+                    char escaped[128]; int ep = 0;
+                    for (const char *sp = sv; *sp && ep < 120; sp++) {
+                        if (*sp == '\n')      { escaped[ep++]='\\'; escaped[ep++]='n'; }
+                        else if (*sp == '\r') { escaped[ep++]='\\'; escaped[ep++]='r'; }
+                        else if ((unsigned char)*sp >= 32) escaped[ep++] = *sp;
+                    }
+                    escaped[ep] = '\0';
+                    snprintf(buf, sizeof(buf), "  //   @0x%lx → \"%s\"",
+                             (unsigned long)fa, escaped);
+                } else {
+                    snprintf(buf, sizeof(buf), "  //   @0x%lx → str", (unsigned long)fa);
+                }
+                fields_add(pd, buf, 0, 0, DETAIL_NONE, -1);
+            }
+            sqlite3_finalize(xr);
+        }
     }
 
     /* 局部变量声明 */
@@ -871,8 +1171,8 @@ int parse_decompile(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
     if (!c) { fields_add(pd, "(DB connection failed)", 0, 0, DETAIL_NONE, -1); return 0; }
 
     char buf[512];
-    fields_add(pd, "=== Decompile — select function, Enter = decompile → right panel ===", 0, 0, DETAIL_NONE, -1);
-    fields_add(pd, "v3: operand-aware + ir_stmts variable resolution", 0, 0, DETAIL_NONE, -1);
+    fields_add(pd, "=== Decompile — v4 section-aware ===", 0, 0, DETAIL_NONE, -1);
+    fields_add(pd, "Cross-section: .symtab+.dynsym+.rodata+.data+.plt+.rela → C pseudo-code", 0, 0, DETAIL_NONE, -1);
     fields_add(pd, "", 0, 0, DETAIL_NONE, -1);
 
     sqlite3_stmt *st = NULL;
@@ -888,6 +1188,7 @@ int parse_decompile(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
         int bbc        = sqlite3_column_int(st, 2);
         uint64_t fe    = (uint64_t)sqlite3_column_int64(st, 3);
 
+        /* 指令数 */
         sqlite3_stmt *ic = NULL;
         int insn_cnt = 0;
         sqlite3_prepare_v2(c,
@@ -901,12 +1202,80 @@ int parse_decompile(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
             sqlite3_finalize(ic);
         }
 
+        /* v4: 节上下文 — 函数所在的节 */
+        char sec_ctx[32] = "";
+        {
+            char sec_n[64] = "", sec_t[32] = "";
+            addr_section_context(c, fa, sec_n, sizeof(sec_n), sec_t, sizeof(sec_t));
+            if (sec_n[0]) {
+                /* 缩短常见节名 */
+                if (strstr(sec_n, "text"))      snprintf(sec_ctx, sizeof(sec_ctx), ".text");
+                else if (strstr(sec_n, "plt"))  snprintf(sec_ctx, sizeof(sec_ctx), ".plt");
+                else if (strstr(sec_n, "init")) snprintf(sec_ctx, sizeof(sec_ctx), ".init");
+                else snprintf(sec_ctx, sizeof(sec_ctx), "%.5s", sec_n);
+            }
+        }
+
+        /* v4: 调用数 (从 cfg_edges 统计 call 类型边) */
+        int call_cnt = 0;
+        sqlite3_stmt *cc = NULL;
+        sqlite3_prepare_v2(c,
+            "SELECT COUNT(*) FROM cfg_edges "
+            "WHERE from_addr BETWEEN ?1 AND ?2 AND edge_type='call'",
+            -1, &cc, NULL);
+        if (cc) {
+            sqlite3_bind_int64(cc, 1, (sqlite3_int64)fa);
+            sqlite3_bind_int64(cc, 2, (sqlite3_int64)fe);
+            if (sqlite3_step(cc) == SQLITE_ROW) call_cnt = sqlite3_column_int(cc, 0);
+            sqlite3_finalize(cc);
+        }
+
+        /* v4: 字符串引用数 */
+        int str_cnt = 0;
+        sqlite3_stmt *sc = NULL;
+        sqlite3_prepare_v2(c,
+            "SELECT COUNT(*) FROM xrefs x "
+            "JOIN strings s ON s.address=x.to_addr "
+            "WHERE x.from_addr BETWEEN ?1 AND ?2",
+            -1, &sc, NULL);
+        if (sc) {
+            sqlite3_bind_int64(sc, 1, (sqlite3_int64)fa);
+            sqlite3_bind_int64(sc, 2, (sqlite3_int64)fe);
+            if (sqlite3_step(sc) == SQLITE_ROW) str_cnt = sqlite3_column_int(sc, 0);
+            sqlite3_finalize(sc);
+        }
+
         n++;
         snprintf(buf, sizeof(buf),
-                 "[%3d] 0x%lx  %-35s  %3d BBs  %4d insns",
-                 n, (unsigned long)fa, nm ? nm : "?", bbc, insn_cnt);
+            "[%3d] 0x%lx %-28s %-6s %3dBB %4di %2dCALL %2dSTR",
+            n, (unsigned long)fa, nm ? nm : "?", sec_ctx,
+            bbc, insn_cnt, call_cnt, str_cnt);
         fields_add(pd, buf, 0, 1, DETAIL_NONE, (int)(fa & 0x7FFFFFFF));
     }
     sqlite3_finalize(st);
+
+    /* 节分布摘要 */
+    {
+        fields_add(pd, "", 0, 0, DETAIL_NONE, -1);
+        fields_add(pd, "── Section Distribution ──", 0, 0, DETAIL_NONE, -1);
+        sqlite3_stmt *ds = NULL;
+        sqlite3_prepare_v2(c,
+            "SELECT s.name, COUNT(*) as cnt FROM functions f "
+            "JOIN sections s ON f.start_addr BETWEEN s.addr AND s.addr+s.size "
+            "WHERE s.type != 0 GROUP BY s.name ORDER BY cnt DESC",
+            -1, &ds, NULL);
+        if (ds) {
+            while (sqlite3_step(ds) == SQLITE_ROW) {
+                const char *sn = (const char *)sqlite3_column_text(ds, 0);
+                int cnt = sqlite3_column_int(ds, 1);
+                snprintf(buf, sizeof(buf), "  %-24s %3d functions", sn ? sn : "?", cnt);
+                fields_add(pd, buf, 0, 0, DETAIL_NONE, -1);
+            }
+            sqlite3_finalize(ds);
+        }
+    }
+
+    fields_add(pd, "", 0, 0, DETAIL_NONE, -1);
+    fields_add(pd, "[Enter]=decompile to right panel  [h]=back", 0, 0, DETAIL_NONE, -1);
     return pd->count;
 }

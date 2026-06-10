@@ -139,7 +139,7 @@ int btn_gotplt_dyn_action(TuiApp *app)
     }
 
     /* ── 5. 标题 ──────────────────────────────────────────── */
-    char buf[512];
+    char buf[1024];
     int gc = (int)(got_sec->sh_size / sizeof(Elf64_Addr));
     dyn_got_gc = gc;
 
@@ -156,7 +156,7 @@ int btn_gotplt_dyn_action(TuiApp *app)
     snprintf(buf, sizeof(buf), "=== Dynamic GOT/PLT (PID=%d, RELRO:%s) ===",
              app->debug->pid, rs);
     fields_add(&app->middle_data, buf, 0, 0, DETAIL_NONE, -1);
-    snprintf(buf, sizeof(buf), "GOT@0x%lx (%d slots)  [Enter]=detail  [h]=back",
+    snprintf(buf, sizeof(buf), "GOT@0x%lx (%d slots)  [Enter]=detail  [h]=back  [,/.]=H-scroll",
              (unsigned long)dyn_got_runtime, gc);
     fields_add(&app->middle_data, buf, 0, 0, DETAIL_NONE, -1);
 
@@ -169,7 +169,7 @@ int btn_gotplt_dyn_action(TuiApp *app)
         debug_readmem(app->debug, ga, &val, sizeof(val));
         char lib[64]; resolve_lib(val, lib, sizeof(lib));
         snprintf(buf, sizeof(buf),
-            "GOT[%d]  %-32s  %-24s  0x%016lx  0x%016lx",
+            "GOT[%d] %-20s %-12s 0x%lx 0x%lx",
             i, rd[i], lib, (unsigned long)ga, (unsigned long)val);
         fields_add(&app->middle_data, buf, 0, 1, DETAIL_NONE, (int)(ga & 0xFFFF));
     }
@@ -199,7 +199,7 @@ int btn_gotplt_dyn_action(TuiApp *app)
         }
 
         snprintf(buf, sizeof(buf),
-            "GOT[%d]  %-32s  %-24s  0x%016lx  0x%016lx",
+            "GOT[%d] %-20s %-12s 0x%lx 0x%lx",
             i, sn, lib, (unsigned long)ga, (unsigned long)val);
         fields_add(&app->middle_data, buf, 0, 1, DETAIL_NONE, (int)(ga & 0xFFFF));
     }

@@ -112,6 +112,9 @@ void left_panel_init(PanelData *pd, Elf64_Ctx *ctx)
         add_button(pd, "DF Inter",   BTN_DATAFLOW_INTER);
     }
 
+    /* Decompile: 独立顶级入口 (v4 section-aware C伪代码) */
+    fields_add(pd, "▶ Decompile", 0, 1, DETAIL_NONE, BTN_DECOMPILE);
+
 
     /* ============================================
      * 5. Security Audit (可折叠)
@@ -259,7 +262,7 @@ void left_panel_handle_enter(PanelData *left, PanelData *middle,
     } else if (sel->detail_kind == DETAIL_PHDR) {
         /* 展开单个 Program Header 详情到中面板 */
         fields_add(middle, "=== Program Header Detail ===", 0, 0, DETAIL_NONE, -1);
-        char detail_buf[256];
+        char detail_buf[512];
         Elf64_Phdr *ph = elf_get_phdr(ctx, idx);
         char fb[8];
         snprintf(detail_buf, sizeof(detail_buf), "p_type:   0x%08X — %s",
@@ -280,6 +283,46 @@ void left_panel_handle_enter(PanelData *left, PanelData *middle,
         fields_add(middle, detail_buf, 1, 0, DETAIL_NONE, -1);
         snprintf(detail_buf, sizeof(detail_buf), "p_align:  0x%lX", (unsigned long)ph->p_align);
         fields_add(middle, detail_buf, 1, 0, DETAIL_NONE, -1);
+
+        /* ── 列出该段包含的节 ── */
+        {
+            Elf64_Ehdr *ehdr = (Elf64_Ehdr *)ctx->map;
+            uint64_t seg_start = ph->p_vaddr;
+            uint64_t seg_end   = ph->p_vaddr + ph->p_memsz;
+
+            /* 先统计匹配的节数 */
+            int n_matched = 0;
+            for (int i = 0; i < ehdr->e_shnum; i++) {
+                Elf64_Shdr *sh = elf_get_shdr(ctx, i);
+                if (!sh || sh->sh_addr == 0 || sh->sh_size == 0) continue;
+                if (sh->sh_addr >= seg_start &&
+                    sh->sh_addr + sh->sh_size <= seg_end)
+                    n_matched++;
+            }
+
+            fields_add(middle, "", 0, 0, DETAIL_NONE, -1);
+            snprintf(detail_buf, sizeof(detail_buf),
+                     "── Contains %d section(s) ──", n_matched);
+            fields_add(middle, detail_buf, 0, 0, DETAIL_NONE, -1);
+
+            /* 列出匹配的节: 编号 + 名称 + 地址范围 + 大小 */
+            for (int i = 0; i < ehdr->e_shnum; i++) {
+                Elf64_Shdr *sh = elf_get_shdr(ctx, i);
+                if (!sh || sh->sh_addr == 0 || sh->sh_size == 0) continue;
+                if (sh->sh_addr >= seg_start &&
+                    sh->sh_addr + sh->sh_size <= seg_end) {
+                    const char *sname = elf_section_name(ctx, i);
+                    snprintf(detail_buf, sizeof(detail_buf),
+                             "[%2d] %-20s 0x%lx-0x%lx  (%lu B)",
+                             i, sname ? sname : "?",
+                             (unsigned long)sh->sh_addr,
+                             (unsigned long)(sh->sh_addr + sh->sh_size),
+                             (unsigned long)sh->sh_size);
+                    fields_add(middle, detail_buf, 0, 0,
+                               DETAIL_NONE, -1);
+                }
+            }
+        }
     } else if (sel->detail_kind == DETAIL_SHDR) {
         Elf64_Shdr *sh = elf_get_shdr(ctx, idx);
         switch (sh->sh_type) {

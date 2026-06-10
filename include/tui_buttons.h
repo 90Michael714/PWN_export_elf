@@ -60,6 +60,7 @@ enum {
     BTN_HEAPREPLAY   = -74,
     BTN_BINDIFF      = -75,
     BTN_SYMBOLIC     = -76,
+    BTN_DECOMPILE    = -77,
 };
 
 /* 按钮 action 函数 — 每个返回 0=成功, -1=失败 */
@@ -113,6 +114,7 @@ int btn_heaptrace_action    (TuiApp *app);
 int btn_heapreplay_action   (TuiApp *app);
 int btn_bindiff_action      (TuiApp *app);
 int btn_symbolic_action     (TuiApp *app);
+int btn_decompile_action    (TuiApp *app);
 
 /* 按钮分发器: 根据 detail_index 调用对应 action */
 int btn_dispatch(TuiApp *app, int detail_index);

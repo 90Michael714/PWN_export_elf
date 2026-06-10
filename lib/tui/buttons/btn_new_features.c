@@ -477,3 +477,31 @@ int btn_symbolic_action(TuiApp *app)
     app->need_render = 1;
     return 0;
 }
+
+/* ================================================================== */
+/* Decompile — C 伪代码反编译 (v4 section-aware)                       */
+/* ================================================================== */
+
+int btn_decompile_action(TuiApp *app)
+{
+    if (!app) return -1;
+    if (!app->adb) {
+        tui_show_popup(app, "Decompile", "DB not available.\nImport ELF first.");
+        app->need_render = 1; return 0;
+    }
+    g_active_db = app->adb;
+
+    if (app->middle_data.fields) {
+        fields_free(app->middle_data.fields, app->middle_data.count);
+        app->middle_data.fields = NULL;
+        app->middle_data.count = 0;
+        app->middle_data.capacity = 0;
+        app->middle_data.cursor = 0;
+        app->middle_data.scroll = 0;
+    }
+
+    parse_decompile(app->elf, 0, &app->middle_data);
+    app->active_panel = PANEL_MIDDLE;
+    app->need_render = 1;
+    return 0;
+}

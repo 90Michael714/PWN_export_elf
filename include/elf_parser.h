@@ -581,5 +581,8 @@ int           trace_view_handle_key(struct AnalysisDB *adb, int session_id,
 /* bindiff_view.c — 二进制差异比对面板 */
 int           parse_bindiff_view(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd);
 
+/* decompile.c — C 伪代码反编译引擎 (v4 section-aware) */
+int           parse_decompile(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd);
+int           decompile_function_at(uint64_t func_addr, PanelData *pd);
 
 #endif /* ELF_PARSER_H */
