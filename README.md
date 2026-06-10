@@ -5,6 +5,8 @@ A terminal-based interactive ELF64 binary analysis tool for Linux security resea
 reverse engineers, and CTF players. Combines static analysis, runtime debugging, and
 exploit development in a single terminal interface.
 
+
+
 ## Overview
 
 elf-tui provides a three-panel Terminal User Interface (TUI) for exploring ELF64
@@ -80,7 +82,9 @@ make -j$(nproc)
 
 | `PgUp` / `↑`  | Move cursor up |
 | `PgDn` / `↓` | Move cursor down |
-
+| Space / search
+| 'l'  /  Heap Links
+|'c'   /   Heap Chunks
 | `Enter` | Expand / drill into selected item |
 | `h` / `Backspace` | Go back / navigation history |
 | `q` | Quit |
