@@ -18,7 +18,7 @@ gadget search — without leaving the terminal.
 │▶ Program Headers   ││                        ││                           │
 │▶ Section Headers   ││                        ││                           │
 │▶ Code Analysis     ││                        ││                           │
-│                     ││                        ││                           │
+│▶ Decompile         ││                        ││                           │
 │▶ Security Audit    ││                        ││                           │
 │▶ Data Inspector    ││                        ││                           │
 │▶ Tools             ││                        ││                           │
