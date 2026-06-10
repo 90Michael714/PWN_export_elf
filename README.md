@@ -18,7 +18,7 @@ gadget search — without leaving the terminal.
 │▶ Program Headers   ││                        ││                           │
 │▶ Section Headers   ││                        ││                           │
 │▶ Code Analysis     ││                        ││                           │
-│▶ Decompile         ││                        ││                           │
+│                     ││                        ││                           │
 │▶ Security Audit    ││                        ││                           │
 │▶ Data Inspector    ││                        ││                           │
 │▶ Tools             ││                        ││                           │
@@ -76,24 +76,14 @@ make -j$(nproc)
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `→` | Switch to next panel (Left → Middle → Right) |
-| `←` | Switch to previous panel |
-| `PgUp` / `↑` / `k` | Move cursor up |
-| `PgDn` / `↓` / `j` | Move cursor down |
-| `g` | Jump to top of list |
-| `G` | Jump to bottom of list |
+
+
+| `PgUp` / `↑`  | Move cursor up |
+| `PgDn` / `↓` | Move cursor down |
+
 | `Enter` | Expand / drill into selected item |
 | `h` / `Backspace` | Go back / navigation history |
 | `q` | Quit |
-
-### Data View Shortcuts (Middle Panel)
-
-| Key | Action |
-|-----|--------|
-| `d` | Disassemble at selected address |
-| `V` | Show Control Flow Graph (CFG) for function |
-| `f` | Show function details and call arguments |
-| `Space` | Global search (DB + live memory) |
 
 ### Debug Hotkeys (when attached to process)
 
@@ -147,8 +137,6 @@ section to drill into its contents.
 - **DF Inter** — Inter-procedural data flow: cross-function taint
   and value propagation through call graphs.
 
-#### Decompile
-C pseudo-code decompilation of functions (Capstone-based lifting).
 
 #### Security Audit
 - **Hardening** — Security mitigation check: PIE, RELRO, NX, Stack Canary,
