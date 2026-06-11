@@ -1,3 +1,4 @@
+#
 **/[Mm]akefile linguist-vendor=true
 **/[Mm]akefile.* linguist-vendor=true
 **/*.mk linguist-vendor=true
