@@ -5,3 +5,5 @@
 
 **/CMakeLists.txt linguist-vendor=true
 **/*.cmake linguist-vendor=true
+build/* linguist-vendor
+
