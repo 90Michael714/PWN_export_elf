@@ -171,7 +171,7 @@ void left_panel_init(PanelData *pd, Elf64_Ctx *ctx)
     /* ============================================
      * 9. Exploit Tools (可折叠)
      * ============================================ */
-    add_group_header(pd, "Exploit Tools", 10, exploit_expanded, -36);
+    add_group_header(pd, "Exploit Tools", 11, exploit_expanded, -36);
     if (exploit_expanded) {
         add_button(pd, "VulnScan",    BTN_VULNSCAN);
         add_button(pd, "OneGadget",   BTN_ONEGADGET);
@@ -183,6 +183,7 @@ void left_panel_init(PanelData *pd, Elf64_Ctx *ctx)
         add_button(pd, "Fuzzer",      BTN_FUZZER);
         add_button(pd, "BinDiff",     BTN_BINDIFF);
         add_button(pd, "Symbolic",    BTN_SYMBOLIC);
+        add_button(pd, "RtDecomp",    BTN_RT_DECOMP);
     }
 
     fields_add(pd, "▶ VulnReport",    0, 1, DETAIL_NONE, BTN_TRANS_VULN);

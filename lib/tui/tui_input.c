@@ -484,7 +484,7 @@ int tui_handle_input(TuiApp *app, const struct ncinput *ni){
                     di == BTN_PTTRACE || di == BTN_HEAPTRACE ||
                     di == BTN_HEAPREPLAY ||
                     di == BTN_BINDIFF || di == BTN_SYMBOLIC ||
-                    di == BTN_DECOMPILE)){
+                    di == BTN_DECOMPILE || di == BTN_RT_DECOMP)){
                     /* 保存当前活动面板, 按钮 action 不应跳转焦点 */
                     ActivePanel saved = app->active_panel;
                     btn_dispatch(app, sel->detail_index);

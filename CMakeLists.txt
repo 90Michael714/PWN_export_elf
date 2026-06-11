@@ -96,6 +96,7 @@ set(CORE_SOURCES
     lib/core/pt_trace.c
     lib/core/bindiff.c
     lib/core/symbolic_bridge.c
+    lib/core/rt_resolver.c
 )
 
 # TUI 源文件

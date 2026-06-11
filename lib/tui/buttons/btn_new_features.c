@@ -8,6 +8,7 @@
 #include "tui_buttons.h"
 #include "core/ir.h"
 #include "core/pt_trace.h"
+#include "core/rt_resolver.h"
 #include "core/heap_analyzer.h"
 #include "core/db.h"
 #include "core/debug_worker.h"
@@ -556,6 +557,60 @@ int btn_decompile_action(TuiApp *app)
     }
 
     parse_decompile(app->elf, 0, &app->middle_data);
+    app->active_panel = PANEL_MIDDLE;
+    app->need_render = 1;
+    return 0;
+}
+
+/* ================================================================== */
+/* RtDecomp — 运行时感知反编译                                          */
+/* ================================================================== */
+
+int btn_rtdecomp_action(TuiApp *app)
+{
+    if (!app) return -1;
+    if (!app->debug || !app->debug->attached) {
+        tui_show_popup(app, "Runtime Decompile",
+            "No debug session active.\n\n"
+            "Attach to a running process first (Debug -> Attach),\n"
+            "then single-step a few times to capture register state.\n"
+            "RtDecomp uses runtime GOT values + register snapshots + /proc/maps\n"
+            "to resolve indirect calls and data references.");
+        app->need_render = 1; return 0;
+    }
+    if (!app->adb) {
+        tui_show_popup(app, "Runtime Decompile", "DB not available.\nImport ELF first.");
+        app->need_render = 1; return 0;
+    }
+    g_active_db = app->adb;
+
+    if (app->middle_data.fields) {
+        fields_free(app->middle_data.fields, app->middle_data.count);
+        app->middle_data.fields = NULL;
+        app->middle_data.count = 0;
+        app->middle_data.capacity = 0;
+        app->middle_data.cursor = 0;
+        app->middle_data.scroll = 0;
+    }
+
+    /* 一键全解析: 节地址映射 + GOT解析 + 间接调用 + 数据引用 */
+    rt_resolve_all(app->debug, app->elf, app->adb, &app->middle_data);
+
+    /* 如果有选中地址, 自动反编译该函数 */
+    uint64_t target = 0;
+    if (app->middle_data.count > 0 && app->middle_data.cursor < app->middle_data.count)
+        target = (uint64_t)app->middle_data.fields[app->middle_data.cursor].detail_index;
+
+    if (target > 0x1000) {
+        fields_add(&app->middle_data, "", 0, 0, DETAIL_NONE, -1);
+        rt_decompile_function(app->adb, target, &app->middle_data);
+    } else {
+        /* 使用 entry point */
+        Elf64_Ehdr *ehdr = elf_get_ehdr(app->elf);
+        fields_add(&app->middle_data, "", 0, 0, DETAIL_NONE, -1);
+        rt_decompile_function(app->adb, ehdr->e_entry, &app->middle_data);
+    }
+
     app->active_panel = PANEL_MIDDLE;
     app->need_render = 1;
     return 0;
