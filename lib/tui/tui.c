@@ -399,7 +399,8 @@ static void db_cache_path(const char *filename, char *out, size_t sz)
     unsigned long hash = 5381;
     for (const char *p = real; *p; p++)
         hash = ((hash << 5) + hash) + (unsigned char)*p;
-    snprintf(out, sz, "%.*s/%lx.db", (int)(sizeof(dir)-1), dir, hash);
+    int dirlen = (int)sz > 24 ? (int)sz - 24 : 0;
+    snprintf(out, sz, "%.*s/%lx.db", dirlen, dir, hash);
 }
 
 /* ================================================================
