@@ -5,7 +5,8 @@ A terminal-based interactive ELF64 binary analysis tool for Linux security resea
 reverse engineers, and CTF players. Combines static analysis, runtime debugging, and
 exploit development in a single terminal interface.
 
-<img width="1917" height="951" alt="ScreenShot_2026-06-10_170058_036" src="https://github.com/user-attachments/assets/c50f7f50-6b0c-4604-9144-53347256e147" />
+<img width="1920" height="945" alt="ScreenShot_2026-06-11_142730_653" src="https://github.com/user-attachments/assets/ebcb88ac-8610-4c5d-8f87-25b0b69f6161" />
+
 
 
 
@@ -21,15 +22,16 @@ gadget search — without leaving the terminal.
 │▶ ELF Header        ││                        ││                           │
 │▶ Program Headers   ││                        ││                           │
 │▶ Section Headers   ││                        ││                           │
-│▶ Code Analysis     ││                        ││                           │
+│▶ Security Audit    ││                        ││                           │
+|▶ Code Analysis
+|▶ Debug             ││                        ││                           │
 │▶ Decompile         ││                        ││                           │
 │▶ Security Audit    ││                        ││                           │
 │▶ Data Inspector    ││                        ││                           │
 │▶ Tools             ││                        ││                           │
-│▶ Debug             ││                        ││                           │
 │▶ Exploit Tools     ││                        ││                           │
-│▶ RegAnnotate       ││                        ││                           │
-│▶ VulnReport        ││                        ││                           │
+│▶ Tools             ││                        ││                           │
+│                     ││                        ││                           │
 └────────────────────┘└────────────────────────┘└───────────────────────────┘
   Left (20%)             Middle (30%)              Right (50%)
   Navigation tree        Data / disasm / report    Detail explanation
