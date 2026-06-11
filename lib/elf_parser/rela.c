@@ -38,7 +38,7 @@ int parse_rela(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
             if (str_shdr) sym_stroff = str_shdr->sh_offset;
         }
 
-        for (int i = 0; i < count && i < 2000; i++) {
+        for (int i = 0; i < count && i < 50000; i++) {
             Elf64_Rela *rela = &relas[i];
             uint32_t sym_idx = rela->r_info >> 32;
             const char *type_name = elf_reloc_type_str(machine, rela->r_info);
@@ -67,7 +67,7 @@ int parse_rela(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
                  sec_name, count);
         fields_add(pd, buf, 0, 0, DETAIL_NONE, -1);
 
-        for (int i = 0; i < count && i < 2000; i++) {
+        for (int i = 0; i < count && i < 50000; i++) {
             Elf64_Rel *rel = &rels[i];
             const char *type_name = elf_reloc_type_str(machine, rel->r_info);
 

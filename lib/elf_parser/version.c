@@ -111,7 +111,7 @@ int parse_version(Elf64_Ctx *ctx, PanelData *pd)
         snprintf(buf, sizeof(buf), "=== Version Symbols (.gnu.version) — %d entries ===", count);
         fields_add(pd, buf, 0, 0, DETAIL_NONE, -1);
 
-        for (int i = 0; i < count && i < 200; i++) {
+        for (int i = 0; i < count && i < 50000; i++) {
             Elf64_Half vs = versyms[i];
             const char *desc = "";
             if (vs == 0) desc = "local";
@@ -121,7 +121,7 @@ int parse_version(Elf64_Ctx *ctx, PanelData *pd)
             snprintf(buf, sizeof(buf), "[%5d] versym=0x%04X (%s)", i, vs, desc);
             fields_add(pd, buf, 1, 0, DETAIL_NONE, -1);
         }
-        if (count > 200) fields_add(pd, "... (truncated)", 1, 0, DETAIL_NONE, -1);
+        if (count > 50000) fields_add(pd, "... (truncated)", 1, 0, DETAIL_NONE, -1);
     }
 
     if (verdef_idx < 0 && verneed_idx < 0 && versym_idx < 0) {

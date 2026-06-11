@@ -42,12 +42,12 @@ static int parse_symtab_db(AnalysisDB *adb, const char *table_name, PanelData *p
     /* 查询: 按地址排序 */
     sqlite3_prepare_v2(c,
         "SELECT address, name, size, type, bind FROM symbols "
-        "WHERE table_name=?1 ORDER BY address LIMIT 2000",
+        "WHERE table_name=?1 ORDER BY address LIMIT 50000",
         -1, &st, NULL);
     if (st) {
         sqlite3_bind_text(st, 1, table_name, -1, SQLITE_STATIC);
         int i = 0;
-        while (sqlite3_step(st) == SQLITE_ROW && i < 2000) {
+        while (sqlite3_step(st) == SQLITE_ROW && i < 50000) {
             uint64_t addr = (uint64_t)sqlite3_column_int64(st, 0);
             const char *name = (const char *)sqlite3_column_text(st, 1);
             int sz           = sqlite3_column_int(st, 2);
@@ -65,8 +65,8 @@ static int parse_symtab_db(AnalysisDB *adb, const char *table_name, PanelData *p
         sqlite3_finalize(st);
     }
 
-    if (total > 2000)
-        fields_add(pd, "... (truncated, showing first 2000)", 0, 0, DETAIL_NONE, -1);
+    if (total > 50000)
+        fields_add(pd, "... (truncated, showing first 50000)", 0, 0, DETAIL_NONE, -1);
 
     return 0;
 }
@@ -96,7 +96,7 @@ static int parse_symtab_mmap(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
 
     Elf64_Sym *syms = (Elf64_Sym*)(ctx->map + sh->sh_offset);
 
-    for (int i = 0; i < sym_count && i < 2000; i++) {
+    for (int i = 0; i < sym_count && i < 50000; i++) {
         Elf64_Sym *sym = &syms[i];
         const char *name = (sym->st_name && stroff)
             ? elf_strtab_get(ctx, stroff, sym->st_name) : "";
@@ -121,8 +121,8 @@ static int parse_symtab_mmap(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
         fields_add(pd, buf, 0, 1, DETAIL_SYM, i);
     }
 
-    if (sym_count > 2000) {
-        fields_add(pd, "... (truncated, showing first 2000 symbols)",
+    if (sym_count > 50000) {
+        fields_add(pd, "... (truncated, showing first 50000 symbols)",
                    0, 0, DETAIL_NONE, -1);
     }
 
