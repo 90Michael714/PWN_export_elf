@@ -1,6 +1,6 @@
+**/[Mm]akefile linguist-vendor=true
+**/[Mm]akefile.* linguist-vendor=true
+**/*.mk linguist-vendor=true
 
-/[Mm]akefile linguist-documentation=true
-*.mk linguist-documentation=true
-
-/CMakeLists.txt linguist-documentation=true
-*.cmake linguist-documentation=true
+**/CMakeLists.txt linguist-vendor=true
+**/*.cmake linguist-vendor=true
