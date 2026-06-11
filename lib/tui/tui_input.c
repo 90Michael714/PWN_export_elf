@@ -494,7 +494,7 @@ int tui_handle_input(TuiApp *app, const struct ncinput *ni){
                 }}
                 /* 左面板所有操作均不跳转焦点 — 用户用 → 手动切到中面板 */
                 { extern AnalysisDB *g_active_db; g_active_db = app->adb; }
-                left_panel_handle_enter(&app->left_data,&app->middle_data,app->elf);
+                left_panel_handle_enter(&app->left_data,&app->middle_data,&app->right_data,app->elf);
                 break;
             }
             case PANEL_MIDDLE: {

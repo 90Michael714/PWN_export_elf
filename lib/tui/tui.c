@@ -664,8 +664,26 @@ int tui_submit_analysis(TuiApp *app, WorkerFn fn, int arg_int,
 }
 
 void tui_render_all(TuiApp *app){
-    /* 只在需要时渲染, 避免空转刷屏吃 CPU */
-    if(!app->need_render && !app->popup_active) return;
+    /* ── 后台导入状态管理 (始终检查, 与渲染解耦) ── */
+    static int import_launched = 0;
+    if (app->db_importing && !import_launched) {
+        import_launched = 1;
+        ImportJob *j = malloc(sizeof(ImportJob));
+        j->adb = app->adb; j->ctx = app->elf; j->flag = &app->db_importing;
+        pthread_t tid;
+        pthread_create(&tid, NULL, import_thread, j);
+        pthread_detach(tid);
+        tui_set_status(app, "Importing ELF data to DB...");
+    }
+    if (app->db_importing == 0 && import_launched) {
+        import_launched = 0;
+        tui_set_status(app, "%s | ELF64 | Ready", app->elf->filename);
+        app->need_render = 1;  /* 状态栏变化需要重绘 */
+    }
+
+    /* 只在需要时渲染, 避免空转刷屏吃 CPU.
+     * 弹窗激活但 need_render=0 时也不渲染 — 弹窗由事件循环独立维护. */
+    if(!app->need_render) return;
 
     /* ── 异步 Job 完成检测 ── */
     if(app->pending_job && app->job_running){
@@ -687,69 +705,6 @@ void tui_render_all(TuiApp *app){
             job_free(app->pending_job);
             app->pending_job = NULL;
             app->job_running = 0;
-        }
-    }
-
-    /* 后台导入: 首次渲染时启动, TUI 已可见 */
-    static int import_launched = 0;
-    if (app->db_importing && !import_launched) {
-        import_launched = 1;
-        ImportJob *j = malloc(sizeof(ImportJob));
-        j->adb = app->adb; j->ctx = app->elf; j->flag = &app->db_importing;
-        pthread_t tid;
-        pthread_create(&tid, NULL, import_thread, j);
-        pthread_detach(tid);
-        tui_set_status(app, "Importing ELF data to DB...");
-    }
-    if (app->db_importing == 0 && import_launched) {
-        import_launched = 0;
-        tui_set_status(app, "%s | ELF64 | Ready",
-            app->elf->filename);
-
-        /* 导入完成 → 自动弹出摘要窗口 */
-        {
-            sqlite3 *c = (sqlite3 *)db_conn(app->adb);
-            char sum[2048];
-            int pos = 0;
-            int total = 0;
-
-            pos += snprintf(sum + pos, sizeof(sum) - (size_t)pos,
-                "Database import finished.\n\n");
-
-            /* 查询各表记录数 */
-            static const char *tables[] = {
-                "sections",     "Sections",
-                "symbols",      "Symbols",
-                "instructions", "Instructions",
-                "functions",    "Functions",
-                "basic_blocks", "Basic Blocks",
-                "cfg_edges",    "CFG Edges",
-                "xrefs",        "Cross References",
-                "strings",      "Strings",
-            };
-            for (int i = 0; i < 8; i++) {
-                sqlite3_stmt *st = NULL;
-                char q[128];
-                snprintf(q, sizeof(q), "SELECT COUNT(*) FROM %s", tables[i*2]);
-                if (sqlite3_prepare_v2(c, q, -1, &st, NULL) == SQLITE_OK
-                    && sqlite3_step(st) == SQLITE_ROW) {
-                    int cnt = sqlite3_column_int(st, 0);
-                    total += cnt;
-                    pos += snprintf(sum + pos, sizeof(sum) - (size_t)pos,
-                        "  %-18s %7d\n", tables[i*2+1], cnt);
-                }
-                if (st) sqlite3_finalize(st);
-            }
-
-            pos += snprintf(sum + pos, sizeof(sum) - (size_t)pos,
-                "  ───────────────────\n"
-                "  %-18s %7d\n\n",
-                "Total records", total);
-
-            pos += snprintf(sum + pos, sizeof(sum) - (size_t)pos,
-                "All data cached — subsequent opens are instant.\n"
-                "Press q / Esc to close.");
-            tui_show_popup(app, "Import Complete — DB Summary", sum);
         }
     }
 
@@ -986,33 +941,25 @@ void tui_run(TuiApp *app){
     /* 初始渲染 */
     a->need_render = 1;
     tui_render_all(a);
+    a->need_render = 0;
     if(a->popup_active){
         render_popup(a);
         a->popup_dirty = 0;
         notcurses_render(a->nc);
     }
 
-    /* 事件循环: notcurses_get 解码转义序列 + select() 速率限制.
-     *
-     * 为什么先调 notcurses_get 再 select():
-     *   notcurses_get(NULL) — 正常 Linux 阻塞直到有输入; WSL2 不阻塞立即返回.
-     *   如果 WSL2 上立即返回且无按键, select(20ms) 提供速率限制, 避免空转.
-     *   notcurses_get 每次都调用 → 内部缓冲区始终排空 → 不会堆积.
-     *   notcurses_get 负责把转义序列解码为 NCKEY_* 常量, tui_handle_input 才能识别.
-     */
+    /* 事件循环: 每轮调用 tui_render_all 检查导入状态并按需渲染.
+     * 弹窗激活时: 若背景刚被渲染则必须重绘弹窗 (背景渲染会擦除弹窗). */
     while(a->running){
-        /* ── 首先检查是否需要重绘 (渲染必须在获取输入之前,
-         *    否则 F5-F10 等热键执行 continue 后会被 notcurses_get 阻塞) ── */
-        if(a->need_render || a->popup_dirty){
-            if(a->need_render){
-                tui_render_all(a);
-                a->need_render = 0;
-            }
-            if(a->popup_active && a->popup_dirty){
-                render_popup(a);
-                a->popup_dirty = 0;
-                notcurses_render(a->nc);
-            }
+        int need_render_before = a->need_render;
+        tui_render_all(a);
+        int bg_rendered = (need_render_before || a->need_render);
+        a->need_render = 0;
+
+        if(a->popup_active && (a->popup_dirty || bg_rendered)){
+            render_popup(a);
+            a->popup_dirty = 0;
+            notcurses_render(a->nc);
         }
 
         /* ── 获取输入 ── */

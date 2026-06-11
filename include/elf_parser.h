@@ -490,6 +490,8 @@ int           parse_phdr(Elf64_Ctx *ctx, PanelData *pd);
 /* shdr.c — Section Headers 解析 */
 int           parse_shdr_list(Elf64_Ctx *ctx, PanelData *pd);
 int           parse_shdr_detail(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd);
+int           parse_shdr_detail_full(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd);
+int           parse_shdr_detail_right(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd);
 
 /* symtab.c — 符号表解析 */
 int           parse_symtab(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd);

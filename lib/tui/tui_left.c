@@ -229,7 +229,7 @@ static void rebuild_left_panel(PanelData *pd, Elf64_Ctx *ctx, int saved_cursor)
  * ================================================================ */
 
 void left_panel_handle_enter(PanelData *left, PanelData *middle,
-                              Elf64_Ctx *ctx)
+                              PanelData *right, Elf64_Ctx *ctx)
 {
     if (!left || left->cursor < 0 || left->cursor >= left->count) return;
     if (!middle) return;
@@ -325,17 +325,42 @@ void left_panel_handle_enter(PanelData *left, PanelData *middle,
         }
     } else if (sel->detail_kind == DETAIL_SHDR) {
         Elf64_Shdr *sh = elf_get_shdr(ctx, idx);
+
+        /* 清空右面板 (为详细内容准备) */
+        if (right) {
+            if (right->fields) {
+                fields_free(right->fields, right->count);
+                right->fields = NULL;
+                right->count = 0;
+                right->capacity = 0;
+                right->cursor = 0;
+                right->scroll = 0;
+                right->scroll_x = 0;
+            }
+        }
+
         switch (sh->sh_type) {
             case SHT_SYMTAB:
-            case SHT_DYNSYM:   parse_symtab(ctx, idx, middle);    break;
+            case SHT_DYNSYM:     parse_symtab(ctx, idx, middle);    break;
             case SHT_RELA:
-            case SHT_REL:      parse_rela(ctx, idx, middle);      break;
-            case SHT_NOTE:     parse_note(ctx, idx, middle);      break;
-            case SHT_DYNAMIC:  parse_dynamic(ctx, middle);        break;
+            case SHT_REL:        parse_rela(ctx, idx, middle);      break;
+            case SHT_NOTE:       parse_note(ctx, idx, middle);      break;
+            case SHT_DYNAMIC:    parse_dynamic(ctx, middle);        break;
             case SHT_GNU_verdef:
             case SHT_GNU_verneed:
-            case SHT_GNU_versym: parse_version(ctx, middle);      break;
-            default:           parse_shdr_detail(ctx, idx, middle); break;
+            case SHT_GNU_versym: parse_version(ctx, middle);        break;
+            case SHT_INIT_ARRAY:
+            case SHT_FINI_ARRAY:
+            case SHT_PREINIT_ARRAY:
+                                 parse_init_array(ctx, idx, middle); break;
+            case SHT_HASH:
+            case SHT_GNU_HASH:
+            default:
+                /* 中面板: ELF 节头字段 + DB 统计 */
+                parse_shdr_detail(ctx, idx, middle);
+                /* 右面板: 详细内容 (指令/符号/字符串/hexdump) */
+                if (right) parse_shdr_detail_right(ctx, idx, right);
+                break;
         }
     }
 }

@@ -104,7 +104,7 @@ static int parse_debug_line(Elf64_Ctx *ctx, AnalysisDB *db)
         if (unit_len == 0 || p + unit_len > end) break;
         if (unit_len == 0xFFFFFFFF) { p += 8; unit_len = *(uint32_t *)p; p += 4; } /* DWARF64 跳过 */
 
-        const uint8_t *unit_end = p + unit_len - 4;
+        const uint8_t *unit_end = p + unit_len;  /* p已跳过unit_len字段 */
         uint16_t version = *(uint16_t *)p; p += 2;
         if (version < 2 || version > 5) { p = unit_end; continue; }
 

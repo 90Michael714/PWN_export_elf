@@ -304,6 +304,21 @@ static const char *TABLE_SQL =
     "  access_count INTEGER DEFAULT 0,"
     "  first_access INTEGER,"
     "  containing_function INTEGER);"    /* 发现位置 (NULL=跨函数) */
+    /* Phase 5: DWARF tables (must be in TABLE_SQL — dwarf_read_all runs during import) */
+    "CREATE TABLE IF NOT EXISTS dwarf_lines("
+    "  addr INTEGER PRIMARY KEY, source_file TEXT,"
+    "  line_no INTEGER DEFAULT 0, column_no INTEGER DEFAULT 0);"
+    "CREATE TABLE IF NOT EXISTS dwarf_funcs("
+    "  addr INTEGER PRIMARY KEY, name TEXT NOT NULL,"
+    "  source_file TEXT, line_no INTEGER DEFAULT 0,"
+    "  return_type TEXT, is_external INTEGER DEFAULT 0);"
+    "CREATE TABLE IF NOT EXISTS dwarf_vars("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,"
+    "  type_name TEXT, addr INTEGER DEFAULT 0,"
+    "  function_addr INTEGER DEFAULT 0,"
+    "  source_file TEXT, line_no INTEGER DEFAULT 0);"
+    "CREATE TABLE IF NOT EXISTS dwarf_sources("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT, file_path TEXT UNIQUE NOT NULL);"
     "CREATE INDEX IF NOT EXISTS idx_sl_base ON struct_layouts(base_reg, field_offset);";
 
 /* 索引统一创建 (数据导入后调用) */
@@ -334,22 +349,6 @@ static const char *INDEX_SQL =
     "CREATE INDEX IF NOT EXISTS idx_dt_conf ON data_types(insn_addr, confidence);"
     "CREATE INDEX IF NOT EXISTS idx_liv_varloc ON loop_induction_vars(loop_id);"
     "CREATE INDEX IF NOT EXISTS idx_struct_base ON struct_layouts(base_reg);"
-
-    /* Phase 5: DWARF debug info tables */
-    "CREATE TABLE IF NOT EXISTS dwarf_lines("
-    "  addr INTEGER PRIMARY KEY, source_file TEXT,"
-    "  line_no INTEGER DEFAULT 0, column_no INTEGER DEFAULT 0);"
-    "CREATE TABLE IF NOT EXISTS dwarf_funcs("
-    "  addr INTEGER PRIMARY KEY, name TEXT NOT NULL,"
-    "  source_file TEXT, line_no INTEGER DEFAULT 0,"
-    "  return_type TEXT, is_external INTEGER DEFAULT 0);"
-    "CREATE TABLE IF NOT EXISTS dwarf_vars("
-    "  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,"
-    "  type_name TEXT, addr INTEGER DEFAULT 0,"
-    "  function_addr INTEGER DEFAULT 0,"
-    "  source_file TEXT, line_no INTEGER DEFAULT 0);"
-    "CREATE TABLE IF NOT EXISTS dwarf_sources("
-    "  id INTEGER PRIMARY KEY AUTOINCREMENT, file_path TEXT UNIQUE NOT NULL);"
 
     /* Phase 5: Crash Reports (Fuzz auto-triage) */
     "CREATE TABLE IF NOT EXISTS crash_reports("
@@ -492,6 +491,24 @@ int db_import_all(AnalysisDB *db, Elf64_Ctx *ctx) {
     Elf64_Phdr *phdrs = (Elf64_Phdr *)(ctx->map + eh->e_phoff);
 
     sqlite3 *c = db->conn;
+
+    /* 为导入线程打开独立的写连接, 避免与主线程读操作竞争 */
+    const char *db_path = sqlite3_db_filename(c, "main");
+    sqlite3 *wc = NULL;
+    if (db_path && db_path[0]) {
+        if (sqlite3_open_v2(db_path, &wc,
+                            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                            NULL) == SQLITE_OK) {
+            sqlite3_exec(wc, "PRAGMA journal_mode=OFF",  NULL,NULL,NULL);
+            sqlite3_exec(wc, "PRAGMA synchronous=OFF",   NULL,NULL,NULL);
+            sqlite3_exec(wc, "PRAGMA mmap_size=268435456",NULL,NULL,NULL);
+            sqlite3_exec(wc, "PRAGMA cache_size=-32000", NULL,NULL,NULL);
+        } else {
+            wc = NULL;  /* 回退到主连接 */
+        }
+    }
+    if (!wc) wc = c;  /* :memory: 或打开失败时回退到主连接 */
+    c = wc;           /* 后续所有写操作使用独立连接, 避免阻塞主线程读 */
 
     /* ── 1. sections ── */
     {
@@ -725,6 +742,12 @@ int db_import_all(AnalysisDB *db, Elf64_Ctx *ctx) {
             sqlite3_bind_text(s_insn,  6, sn ? sn : "", -1, SQLITE_STATIC);
             sqlite3_step(s_insn);
             total_insn++;
+
+            /* ── 周期性提交: 防止事务过大导致内存耗尽/WSL2卡死 ── */
+            if (total_insn % 5000 == 0) {
+                sqlite3_exec(c, "COMMIT", NULL, NULL, NULL);
+                sqlite3_exec(c, "BEGIN", NULL, NULL, NULL);
+            }
 
             /* ── IR 语义提取 (Capstone detail → ir_stmts) ── */
             if (s_ir && insn->detail) {
@@ -1189,6 +1212,10 @@ int db_import_all(AnalysisDB *db, Elf64_Ctx *ctx) {
     dwarf_read_all(db, ctx);
 
 import_done:
+    /* 关闭独立写连接 */
+    if (wc && wc != db->conn) {
+        sqlite3_close(wc);
+    }
     free(bbs);
     free(funcs);
     db->insn_count = total_insn;

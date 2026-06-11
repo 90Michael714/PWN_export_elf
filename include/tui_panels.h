@@ -15,7 +15,7 @@ typedef enum {
 } ActivePanel;
 
 void left_panel_init(PanelData *pd, Elf64_Ctx *ctx);
-void left_panel_handle_enter(PanelData *left, PanelData *middle, Elf64_Ctx *ctx);
+void left_panel_handle_enter(PanelData *left, PanelData *middle, PanelData *right, Elf64_Ctx *ctx);
 
 void middle_panel_init(PanelData *pd);
 void middle_panel_handle_enter(PanelData *middle, PanelData *right, Elf64_Ctx *ctx);

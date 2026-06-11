@@ -251,3 +251,135 @@ int parse_shdr_detail(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
 
     return pd->count;
 }
+
+/*
+ * parse_shdr_detail_full — 增强版: 头字段 + DB统计 + 实际内容
+ *
+ * 在 parse_shdr_detail 的基础上, 进一步展示:
+ *   DB 有数据 → 查询列出指令/符号/字符串 (前 500 条)
+ *   无 DB 数据 → 从 mmap 读取原始字节 hexdump
+ */
+int parse_shdr_detail_full(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
+{
+    /* 先显示头字段 + DB 统计 */
+    parse_shdr_detail(ctx, shdr_idx, pd);
+
+    /* 再显示详细内容 (指令/符号/字符串/hexdump) */
+    parse_shdr_detail_right(ctx, shdr_idx, pd);
+    return pd->count;
+}
+
+/*
+ * parse_shdr_detail_right — 节详细内容 (指令/符号/字符串/hexdump)
+ *
+ * 从 DB 或 mmap 读取节的详细内容, 用于填充右面板。
+ * 不包括 ELF 节头字段 (那些由 parse_shdr_detail 处理)。
+ */
+int parse_shdr_detail_right(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
+{
+    Elf64_Shdr *sh = elf_get_shdr(ctx, shdr_idx);
+    char buf[512];
+
+    if (!sh || sh->sh_size == 0) return pd->count;
+
+    uint64_t low  = sh->sh_addr;
+    uint64_t high = sh->sh_addr + sh->sh_size;
+
+    /* 标题 */
+    const char *name = elf_section_name(ctx, shdr_idx);
+    snprintf(buf, sizeof(buf), "=== Section [%02d]: %s — Contents ===", shdr_idx, name);
+    fields_add(pd, buf, 0, 0, DETAIL_NONE, -1);
+
+    /* DB 内容展示 */
+    if (g_active_db && low > 0) {
+        sqlite3 *c = (sqlite3 *)db_conn(g_active_db);
+        if (c) {
+            int shown = 0;
+
+            /* 指令 */
+            { sqlite3_stmt *st=NULL; sqlite3_prepare_v2(c,
+                "SELECT COUNT(*) FROM instructions WHERE address BETWEEN ?1 AND ?2",
+                -1,&st,NULL);
+              if(st){ sqlite3_bind_int64(st,1,(sqlite3_int64)low); sqlite3_bind_int64(st,2,(sqlite3_int64)high);
+                if(sqlite3_step(st)==SQLITE_ROW&&sqlite3_column_int(st,0)>0){
+                    sqlite3_stmt *is=NULL; sqlite3_prepare_v2(c,
+                        "SELECT address,mnemonic,op_str FROM instructions "
+                        "WHERE address BETWEEN ?1 AND ?2 ORDER BY address LIMIT 500",
+                        -1,&is,NULL);
+                    if(is){ sqlite3_bind_int64(is,1,(sqlite3_int64)low); sqlite3_bind_int64(is,2,(sqlite3_int64)high);
+                      while(sqlite3_step(is)==SQLITE_ROW){
+                        if(!shown){fields_add(pd,"",0,0,DETAIL_NONE,-1);
+                         fields_add(pd,"── Instructions ────────────────────────────",0,0,DETAIL_NONE,-1); shown=1;}
+                        uint64_t ia=(uint64_t)sqlite3_column_int64(is,0);
+                        const char *mn=(const char*)sqlite3_column_text(is,1);
+                        const char *op=(const char*)sqlite3_column_text(is,2);
+                        snprintf(buf,sizeof(buf),"  0x%lx: %-8s %s",(unsigned long)ia,mn?mn:"?",op?op:"");
+                        fields_add(pd,buf,1,1,DETAIL_NONE,(int)(ia&0x7FFFFFFF)); }
+                      sqlite3_finalize(is); } }
+                sqlite3_finalize(st); } }
+
+            /* 符号 */
+            { sqlite3_stmt *st=NULL; sqlite3_prepare_v2(c,
+                "SELECT address,name,type,bind,size FROM symbols "
+                "WHERE address BETWEEN ?1 AND ?2 ORDER BY address LIMIT 500",
+                -1,&st,NULL);
+              if(st){ sqlite3_bind_int64(st,1,(sqlite3_int64)low); sqlite3_bind_int64(st,2,(sqlite3_int64)high); int n=0;
+                while(sqlite3_step(st)==SQLITE_ROW&&n<500){
+                    if(!shown){fields_add(pd,"",0,0,DETAIL_NONE,-1);
+                     fields_add(pd,"── Symbols ────────────────────────",0,0,DETAIL_NONE,-1); shown=1;}
+                    uint64_t sa=(uint64_t)sqlite3_column_int64(st,0);
+                    const char *nm=(const char*)sqlite3_column_text(st,1);
+                    const char *tp=(const char*)sqlite3_column_text(st,2);
+                    const char *bd=(const char*)sqlite3_column_text(st,3);
+                    int sz=sqlite3_column_int(st,4);
+                    snprintf(buf,sizeof(buf),"  0x%lx %-32s %-6s %-6s %5d",(unsigned long)sa,nm?nm:"?",tp?tp:"?",bd?bd:"",sz);
+                    fields_add(pd,buf,1,1,DETAIL_NONE,(int)(sa&0x7FFFFFFF)); n++; }
+                sqlite3_finalize(st); } }
+
+            /* 字符串 */
+            { sqlite3_stmt *st=NULL; sqlite3_prepare_v2(c,
+                "SELECT address,value,length FROM strings "
+                "WHERE address BETWEEN ?1 AND ?2 ORDER BY address LIMIT 500",
+                -1,&st,NULL);
+              if(st){ sqlite3_bind_int64(st,1,(sqlite3_int64)low); sqlite3_bind_int64(st,2,(sqlite3_int64)high); int n=0;
+                while(sqlite3_step(st)==SQLITE_ROW&&n<500){
+                    if(!shown){fields_add(pd,"",0,0,DETAIL_NONE,-1);
+                     fields_add(pd,"── Strings ─────────────────────────",0,0,DETAIL_NONE,-1); shown=1;}
+                    uint64_t sa=(uint64_t)sqlite3_column_int64(st,0);
+                    const char *val=(const char*)sqlite3_column_text(st,1);
+                    int len=sqlite3_column_int(st,2);
+                    char pv[48]=""; if(val){int pp=0; for(const char *s=val;*s&&pp<44;s++){
+                        if(*s=='\n'){pv[pp++]='\\';pv[pp++]='n';}
+                        else if((unsigned char)*s>=32&&(unsigned char)*s<127)pv[pp++]=*s;} pv[pp]=0;}
+                    snprintf(buf,sizeof(buf),"  0x%lx \"%s\"%s (%dB)",(unsigned long)sa,pv,(val&&(int)strlen(val)>44)?"...":"",len);
+                    fields_add(pd,buf,1,1,DETAIL_NONE,(int)(sa&0x7FFFFFFF)); n++; }
+                sqlite3_finalize(st); } }
+
+            if (shown) return pd->count;
+        }
+    }
+
+    /* mmap hexdump (DB 中无数据时) */
+    if (sh->sh_offset > 0 && sh->sh_size > 0 && sh->sh_size < 0x100000) {
+        const uint8_t *data = ctx->map + sh->sh_offset;
+        size_t dump_sz = sh->sh_size < 4096 ? sh->sh_size : 4096;
+        fields_add(pd, "", 0, 0, DETAIL_NONE, -1);
+        snprintf(buf, sizeof(buf), "── Raw Hexdump (first %zu of %lu B) ──", dump_sz, (unsigned long)sh->sh_size);
+        fields_add(pd, buf, 0, 0, DETAIL_NONE, -1);
+        for (size_t off = 0; off < dump_sz; off += 16) {
+            char hx[100]; int hp = 0;
+            hp += snprintf(hx + hp, sizeof(hx) - (size_t)hp, "  0x%04zx  ", off);
+            for (int b = 0; b < 16; b++) {
+                if (off + b < dump_sz) hp += snprintf(hx + hp, sizeof(hx) - (size_t)hp, "%02x ", data[off + b]);
+                else hp += snprintf(hx + hp, sizeof(hx) - (size_t)hp, "   ");
+            }
+            hp += snprintf(hx + hp, sizeof(hx) - (size_t)hp, " ");
+            for (int b = 0; b < 16 && off + b < dump_sz; b++) {
+                uint8_t c = data[off + b];
+                hp += snprintf(hx + hp, sizeof(hx) - (size_t)hp, "%c", (c >= 32 && c < 127) ? (char)c : '.');
+            }
+            fields_add(pd, hx, 1, 0, DETAIL_NONE, -1);
+        }
+    }
+    return pd->count;
+}
