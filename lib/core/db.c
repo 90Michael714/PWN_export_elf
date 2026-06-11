@@ -7,6 +7,7 @@
 
 #include "core/db.h"
 #include "core/debug_worker.h"
+#include "core/dwarf_reader.h"
 #include "disasm.h"
 #include <sqlite3.h>
 #include <stdarg.h>
@@ -323,11 +324,32 @@ static const char *INDEX_SQL =
     "CREATE INDEX IF NOT EXISTS idx_ir_dst ON ir_stmts(dst);"
     "CREATE INDEX IF NOT EXISTS idx_ir_type ON ir_stmts(op_type);"
     "CREATE INDEX IF NOT EXISTS idx_ir_def ON ir_stmts(def_insn_addr);"
+    /* Phase 5: DWARF debug info 索引 */
+    "CREATE INDEX IF NOT EXISTS idx_dwl_file_line ON dwarf_lines(source_file, line_no);"
+    "CREATE INDEX IF NOT EXISTS idx_dwf_file ON dwarf_funcs(source_file);"
+    "CREATE INDEX IF NOT EXISTS idx_dwv_func ON dwarf_vars(function_addr);"
+    "CREATE INDEX IF NOT EXISTS idx_dwv_addr ON dwarf_vars(addr);"
     /* Phase 4 新表索引 */
     "CREATE INDEX IF NOT EXISTS idx_ctrl_func ON control_structures(function_addr);"
     "CREATE INDEX IF NOT EXISTS idx_dt_conf ON data_types(insn_addr, confidence);"
     "CREATE INDEX IF NOT EXISTS idx_liv_varloc ON loop_induction_vars(loop_id);"
     "CREATE INDEX IF NOT EXISTS idx_struct_base ON struct_layouts(base_reg);"
+
+    /* Phase 5: DWARF debug info tables */
+    "CREATE TABLE IF NOT EXISTS dwarf_lines("
+    "  addr INTEGER PRIMARY KEY, source_file TEXT,"
+    "  line_no INTEGER DEFAULT 0, column_no INTEGER DEFAULT 0);"
+    "CREATE TABLE IF NOT EXISTS dwarf_funcs("
+    "  addr INTEGER PRIMARY KEY, name TEXT NOT NULL,"
+    "  source_file TEXT, line_no INTEGER DEFAULT 0,"
+    "  return_type TEXT, is_external INTEGER DEFAULT 0);"
+    "CREATE TABLE IF NOT EXISTS dwarf_vars("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,"
+    "  type_name TEXT, addr INTEGER DEFAULT 0,"
+    "  function_addr INTEGER DEFAULT 0,"
+    "  source_file TEXT, line_no INTEGER DEFAULT 0);"
+    "CREATE TABLE IF NOT EXISTS dwarf_sources("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT, file_path TEXT UNIQUE NOT NULL);"
 
     /* Phase 5: Crash Reports (Fuzz auto-triage) */
     "CREATE TABLE IF NOT EXISTS crash_reports("
@@ -1162,6 +1184,9 @@ int db_import_all(AnalysisDB *db, Elf64_Ctx *ctx) {
 
     /* ── 11: 漏洞模式扫描 ── */
     db_scan_vulns(db);
+
+    /* ── 12: DWARF 调试信息解析 (.debug_line, .debug_info) ── */
+    dwarf_read_all(db, ctx);
 
 import_done:
     free(bbs);

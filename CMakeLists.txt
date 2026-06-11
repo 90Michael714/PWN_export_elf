@@ -97,6 +97,7 @@ set(CORE_SOURCES
     lib/core/bindiff.c
     lib/core/symbolic_bridge.c
     lib/core/rt_resolver.c
+    lib/core/dwarf_reader.c
 )
 
 # TUI 源文件

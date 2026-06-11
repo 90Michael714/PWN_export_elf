@@ -99,6 +99,19 @@ void left_panel_init(PanelData *pd, Elf64_Ctx *ctx)
     }
 
     /* ============================================
+     * 3b. Security Audit (可折叠)
+     * ============================================ */
+    add_group_header(pd, "Security Audit", 6, security_expanded, -31);
+    if (security_expanded) {
+        add_button(pd, "Hardening",  BTN_HARDENING);
+        add_button(pd, "DangerFunc", BTN_DANGERFUNC);
+        add_button(pd, "VulnReport", BTN_TRANS_VULN);
+        add_button(pd, "ROPgadget",  BTN_ROPGADGET);
+        add_button(pd, "AtkSurface", BTN_ATKSURFACE);
+        add_button(pd, "SegPerm",    BTN_SEGPERM);
+    }
+
+    /* ============================================
      * 4. Code Analysis (可折叠)
      * ============================================ */
     add_group_header(pd, "Code Analysis", 7, code_expanded, -30);
@@ -112,46 +125,8 @@ void left_panel_init(PanelData *pd, Elf64_Ctx *ctx)
         add_button(pd, "DF Inter",   BTN_DATAFLOW_INTER);
     }
 
-    /* Decompile: 独立顶级入口 (v4 section-aware C伪代码) */
-    fields_add(pd, "▶ Decompile", 0, 1, DETAIL_NONE, BTN_DECOMPILE);
-
-
     /* ============================================
-     * 5. Security Audit (可折叠)
-     * ============================================ */
-    add_group_header(pd, "Security Audit", 5, security_expanded, -31);
-    if (security_expanded) {
-        add_button(pd, "Hardening",  BTN_HARDENING);
-        add_button(pd, "DangerFunc", BTN_DANGERFUNC);
-        add_button(pd, "ROPgadget",  BTN_ROPGADGET);
-        add_button(pd, "AtkSurface", BTN_ATKSURFACE);
-        add_button(pd, "SegPerm",    BTN_SEGPERM);
-    }
-
-    /* ============================================
-     * 6. Data Inspector (可折叠)
-     * ============================================ */
-    add_group_header(pd, "Data Inspector", 4, data_expanded, -32);
-    if (data_expanded) {
-        add_button(pd, "MemLayout",  BTN_MEMLAYOUT);
-        add_button(pd, "InitArray",  BTN_INITARRAY);
-        add_button(pd, "StrXRef",    BTN_STRXREF);
-        add_button(pd, "EHFrame",    BTN_EHFRAME);
-    }
-
-    /* ============================================
-     * 7. Tools (可折叠)
-     * ============================================ */
-    add_group_header(pd, "Tools", 4, tools_expanded, -33);
-    if (tools_expanded) {
-        add_button(pd, "Export",     BTN_EXPORT);
-        add_button(pd, "KeyHelp",    BTN_KEYHELP);
-        add_button(pd, "About",      BTN_ABOUT);
-        add_button(pd, "History",    BTN_HISTORY);
-    }
-
-    /* ============================================
-     * 8. Debug (可折叠) — Attach 进程 + 运行时分析
+     * 4b. Debug (可折叠) — Attach 进程 + 运行时分析
      * ============================================ */
     add_group_header(pd, "Debug", 11, debug_expanded, -35);
     if (debug_expanded) {
@@ -168,8 +143,23 @@ void left_panel_init(PanelData *pd, Elf64_Ctx *ctx)
         add_button(pd, "PT Trace",    BTN_PTTRACE);
     }
 
+    /* Decompile: 独立顶级入口 (v4 section-aware C伪代码) */
+    fields_add(pd, "▶ Decompile", 0, 1, DETAIL_NONE, BTN_DECOMPILE);
+
+
     /* ============================================
-     * 9. Exploit Tools (可折叠)
+     * 5. Data Inspector (可折叠)
+     * ============================================ */
+    add_group_header(pd, "Data Inspector", 4, data_expanded, -32);
+    if (data_expanded) {
+        add_button(pd, "MemLayout",  BTN_MEMLAYOUT);
+        add_button(pd, "InitArray",  BTN_INITARRAY);
+        add_button(pd, "StrXRef",    BTN_STRXREF);
+        add_button(pd, "EHFrame",    BTN_EHFRAME);
+    }
+
+    /* ============================================
+     * 7. Exploit Tools (可折叠)
      * ============================================ */
     add_group_header(pd, "Exploit Tools", 11, exploit_expanded, -36);
     if (exploit_expanded) {
@@ -186,7 +176,16 @@ void left_panel_init(PanelData *pd, Elf64_Ctx *ctx)
         add_button(pd, "RtDecomp",    BTN_RT_DECOMP);
     }
 
-    fields_add(pd, "▶ VulnReport",    0, 1, DETAIL_NONE, BTN_TRANS_VULN);
+    /* ============================================
+     * 9. Other (可折叠)
+     * ============================================ */
+    add_group_header(pd, "Other", 4, tools_expanded, -33);
+    if (tools_expanded) {
+        add_button(pd, "Export",     BTN_EXPORT);
+        add_button(pd, "KeyHelp",    BTN_KEYHELP);
+        add_button(pd, "About",      BTN_ABOUT);
+        add_button(pd, "History",    BTN_HISTORY);
+    }
 }
 
 /* ================================================================
