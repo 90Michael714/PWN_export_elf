@@ -42,7 +42,7 @@ gadget search — without leaving the terminal.
 
 ### Prerequisites
 
-- Linux x86-64 (native or WSL2)
+- Linux x86-64 (native or WSL2)  ONLY x86-64 ELF
 - GCC 13+ (C17)
 - CMake 3.16+
 
@@ -54,22 +54,7 @@ gadget search — without leaving the terminal.
 | [Capstone](https://www.capstone-engine.org/) | 4.0+ | x86-64 disassembly engine |
 | [SQLite3](https://www.sqlite.org/) | 3.x | Persistent analysis database |
 
-### Build
-
-```bash
-cd ~/workspace/elf-tui
-mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
-```
-
-For debug builds with warnings:
-```bash
-cmake .. -DCMAKE_BUILD_TYPE=Debug
-make -j$(nproc)
-```
-
-### Run
+### Build && Run
 
 ```bash
 ./build/elf-tui /bin/ls          # Analyze any ELF64 binary
