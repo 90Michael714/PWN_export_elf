@@ -342,7 +342,7 @@ int render_reg_single_col(DebugState *ds, PanelData *pd) {
     snprintf(line,sizeof(line),"RSP  0x%llx",(unsigned long long)r->rsp);
     fields_add(pd, line, 1, 1, DETAIL_NONE, -1);
 
-    char efl[64]; eflags_string(r->eflags, efl, sizeof(efl));
+    char efl[60]; eflags_string(r->eflags, efl, sizeof(efl));
     snprintf(line,sizeof(line),"EFL %s", efl);
     fields_add(pd, line, 1, 1, DETAIL_NONE, -1);
 

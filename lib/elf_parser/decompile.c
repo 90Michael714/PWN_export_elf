@@ -215,11 +215,11 @@ int decompile_addr_detail(sqlite3 *c, uint64_t static_input_addr, PanelData *pd)
                 char dst[64]="",src[64]=""; split_ops(op,dst,src);
 
                 /* DWARF 行号 */
-                char sl[16]="";
+                char sl[24]="";
                 { sqlite3_stmt *dl=NULL; sqlite3_prepare_v2(c,
                     "SELECT line_no FROM dwarf_lines WHERE addr=?1 LIMIT 1",-1,&dl,NULL);
                   if(dl){ sqlite3_bind_int64(dl,1,(sqlite3_int64)in->a);
-                    if(sqlite3_step(dl)==SQLITE_ROW){ int ln=sqlite3_column_int(dl,1); if(ln>0)snprintf(sl,16,"  // :%d",ln); }
+                    if(sqlite3_step(dl)==SQLITE_ROW){ int ln=sqlite3_column_int(dl,1); if(ln>0)snprintf(sl,sizeof(sl),"  // :%d",ln); }
                     sqlite3_finalize(dl); } }
 
                 char sp[16]; memset(sp,' ',16); int spp=indent*2; if(spp>14)spp=14; sp[spp]=0;
@@ -268,7 +268,12 @@ int decompile_addr_detail(sqlite3 *c, uint64_t static_input_addr, PanelData *pd)
                                   if(sy){ sqlite3_bind_int64(sy,1,(sqlite3_int64)iv);
                                     if(sqlite3_step(sy)==SQLITE_ROW){ const char *sn=(const char*)sqlite3_column_text(sy,0); if(sn)snprintf(R,64,"&%s",sn); }
                                     sqlite3_finalize(sy); } }
-                                if(!R[0])snprintf(R,64,s3[0]=='0'&&s3[1]=='x'?"0x%lx":"%s",(unsigned long)iv,s3);
+                                if(!R[0]){
+                                    if(s3[0]=='0'&&s3[1]=='x')
+                                        snprintf(R,64,"0x%lx",(unsigned long)iv);
+                                    else
+                                        snprintf(R,64,"%s",s3);
+                                }
                             } }
                         snprintf(buf,sizeof(buf),"%sif (%s %s %s) {%s",sp,L[0]?L:"?",cond,R[0]?R:"0",sl);
                         fields_add(pd,buf,0,0,DETAIL_NONE,-1);
@@ -345,12 +350,12 @@ int decompile_addr_detail(sqlite3 *c, uint64_t static_input_addr, PanelData *pd)
                 if(by) for(int i=0;i<bsz&&i<8&&hp<28;i++)
                     hp+=snprintf(hx+hp,32-hp,"%02x ",by[i]);
 
-                char sl[12]="";
+                char sl[16]="";
                 { sqlite3_stmt *dl=NULL; sqlite3_prepare_v2(c,
                     "SELECT line_no FROM dwarf_lines WHERE addr=?1 LIMIT 1",-1,&dl,NULL);
                   if(dl){ sqlite3_bind_int64(dl,1,(sqlite3_int64)ia);
                     if(sqlite3_step(dl)==SQLITE_ROW){ int ln=sqlite3_column_int(dl,1);
-                      if(ln>0)snprintf(sl,12," :%-4d",ln); }
+                      if(ln>0)snprintf(sl,sizeof(sl)," :%-4d",ln); }
                     sqlite3_finalize(dl); } }
 
                 char tag[80]="";

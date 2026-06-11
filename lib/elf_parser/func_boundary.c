@@ -39,7 +39,7 @@ int parse_func_boundary(Elf64_Ctx *ctx, int shdr_idx, PanelData *pd)
                 const char *nm=(n&&n[0])?n:"(unnamed)";
                 int is_exp=(ELF64_ST_BIND(sym[j].st_info)==STB_GLOBAL||
                             ELF64_ST_BIND(sym[j].st_info)==STB_WEAK);
-                char sz[16]="?";uint64_t ss=sym[j].st_size;
+                char sz[24]="?";uint64_t ss=sym[j].st_size;
                 if(ss>=1024)snprintf(sz,sizeof(sz),"%luKB",(unsigned long)ss/1024);
                 else if(ss>0)snprintf(sz,sizeof(sz),"%luB",(unsigned long)ss);
                 snprintf(buf,sizeof(buf),"[%04d] 0x%lx %6s %-40s %s",

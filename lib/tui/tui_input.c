@@ -14,6 +14,7 @@
 #include "tui_buttons.h"
 #include "core/reg_view.h"
 #include "core/debug_worker.h"
+#include "core/heap_analyzer.h"
 #include "core/mem_search.h"
 #include "disasm.h"
 #include <string.h>
@@ -382,13 +383,13 @@ int tui_handle_input(TuiApp *app, const struct ncinput *ni){
         if(rt && strstr(rt,"0x")){
             /* 提取寄存器值 */
             char rn[8]; uint64_t rv=0;
-            if(sscanf(rt,"%4s 0x%llx",rn,&rv)==2||sscanf(rt,"%3s 0x%llx",rn,&rv)==2){
+            if(sscanf(rt,"%4s 0x%lx",rn,&rv)==2||sscanf(rt,"%3s 0x%lx",rn,&rv)==2){
                 if(rv>0x1000){  /* 看起来像地址 */
                     if(c=='x'){ /* hexdump */
                         if(app->right_data.fields){fields_free(app->right_data.fields,app->right_data.count);
                             app->right_data.fields=NULL;app->right_data.count=0;app->right_data.capacity=0;
                             app->right_data.cursor=0;app->right_data.scroll=0;app->right_data.scroll_x=0;}
-                        char dbuf[128]; snprintf(dbuf,sizeof(dbuf),"=== Hexdump @ %s ===",rn);
+                        char dbuf[256]; snprintf(dbuf,sizeof(dbuf),"=== Hexdump @ %s ===",rn);
                         fields_add(&app->right_data,dbuf,0,0,DETAIL_NONE,-1);
                         uint8_t mem[128]; int nr=debug_readmem(app->debug,rv,mem,sizeof(mem));
                         if(nr>0){char hx[80];
@@ -403,7 +404,7 @@ int tui_handle_input(TuiApp *app, const struct ncinput *ni){
                         if(app->right_data.fields){fields_free(app->right_data.fields,app->right_data.count);
                             app->right_data.fields=NULL;app->right_data.count=0;app->right_data.capacity=0;
                             app->right_data.cursor=0;app->right_data.scroll=0;app->right_data.scroll_x=0;}
-                        char dbuf[128]; snprintf(dbuf,sizeof(dbuf),"=== Disasm @ %s (0x%llx) ===",rn,rv);
+                        char dbuf[256]; snprintf(dbuf,sizeof(dbuf),"=== Disasm @ %s (0x%lx) ===",rn,rv);
                         fields_add(&app->right_data,dbuf,0,0,DETAIL_NONE,-1);
                         uint8_t code[64]; int nr=debug_readmem(app->debug,rv,code,sizeof(code));
                         if(nr>0){disasm_ctx *dd=disasm_open();if(dd){const uint8_t *cp=code;size_t cs=nr;uint64_t ca=rv;int ln=0;

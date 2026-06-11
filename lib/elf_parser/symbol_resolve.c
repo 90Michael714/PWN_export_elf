@@ -144,7 +144,7 @@ int symbol_resolve(struct DebugState *ds, const char *name,
 
     while (fgets(line, sizeof(line), fp)) {
         char perms[5], fpath[256] = "";
-        if (sscanf(line, "%lx-%*lx %4s %*s %*s %*s %255s",
+        if (sscanf(line, "%lx-%*s %4s %*s %*s %*s %255s",
                    &libc_base, perms, fpath) < 3) continue;
         if (perms[2] == 'x' && strstr(fpath, "libc")) {
             strncpy(libc_path, fpath, 255);
@@ -190,7 +190,7 @@ int symbol_resolve_all(struct DebugState *ds,
     while (fgets(line, sizeof(line), fp) && total < max) {
         uint64_t base;
         char perms[5], fpath[256] = "";
-        if (sscanf(line, "%lx-%*lx %4s %*s %*s %*s %255s",
+        if (sscanf(line, "%lx-%*s %4s %*s %*s %*s %255s",
                    &base, perms, fpath) < 3) continue;
         if (perms[2] != 'x' || fpath[0] != '/') continue;
 

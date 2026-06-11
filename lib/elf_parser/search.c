@@ -183,7 +183,7 @@ typedef struct {
     int          found;         /* 已找到 */
     int          scanned;       /* 已扫描指令总数 */
     /* 结果缓存 */
-    struct { uint64_t addr; char text[128]; } *results;
+    struct { uint64_t addr; char text[256]; } *results;
     int          cap;
     int          cnt;
     Elf64_Ctx   *ctx;

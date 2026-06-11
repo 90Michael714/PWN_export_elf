@@ -41,8 +41,8 @@ static int elf_read_syms(const char *path, rsym_t *out, int max) {
     char *strs = malloc((size_t)dsize);
     Elf64_Sym *syms = malloc((size_t)ssize);
     if (!strs || !syms) { free(strs); free(syms); fclose(fp); return 0; }
-    fseek(fp, doff, SEEK_SET); fread(strs, (size_t)dsize, 1, fp);
-    fseek(fp, soff, SEEK_SET); fread(syms, (size_t)ssize, 1, fp);
+    fseek(fp, doff, SEEK_SET); (void)!fread(strs, (size_t)dsize, 1, fp);
+    fseek(fp, soff, SEEK_SET); (void)!fread(syms, (size_t)ssize, 1, fp);
     fclose(fp);
 
     int n = 0, ns = ssize / (int)sizeof(Elf64_Sym);
@@ -103,7 +103,7 @@ int btn_symresolve_action(TuiApp *app) {
     char line[512];
     while (fgets(line, sizeof(line), fp) && nlibs < 32) {
         uint64_t b; char p[5], f[256]="";
-        if (sscanf(line, "%lx-%*lx %4s %*s %*s %*s %255s", &b, p, f) < 3) continue;
+        if (sscanf(line, "%lx-%*s %4s %*s %*s %*s %255s", &b, p, f) < 3) continue;
         if (p[2] != 'x' || !f[0] || f[0] != '/') continue;
         /* 去重 (同一个库可能有多个映射段) */
         int dup = 0;
@@ -163,7 +163,7 @@ int btn_symresolve_action(TuiApp *app) {
                 }
             }
 
-            snprintf(buf, sizeof(buf), "[%d] 0x%lx  %-32s  %s+0x%lx  %s",
+            snprintf(buf, sizeof(buf), "[%d] 0x%lx  %-32.32s  %s+0x%lx  %s",
                 seq, (unsigned long)rt, syms[si].name,
                 lbl, (unsigned long)syms[si].off,
                 db_tag);
@@ -248,7 +248,7 @@ int btn_symresolve_handle_key(TuiApp *app, int key) {
         for (int li = 0; li < g_sym_nlibs && li < 8; li++) {
             const char *lbl = g_sym_lib_paths[li];
             const char *sl = strrchr(lbl, '/'); if (sl) lbl = sl + 1;
-            snprintf(buf, sizeof(buf), "%-20s  base 0x%lx  size %lu KB",
+            snprintf(buf, sizeof(buf), "%-20.20s  base 0x%lx  size %lu KB",
                 lbl, (unsigned long)g_sym_lib_bases[li],
                 (unsigned long)g_sym_lib_bases[li] / 1024);
             fields_add(&app->middle_data, buf, 0, 0, DETAIL_NONE, -1);
@@ -278,7 +278,7 @@ int btn_symresolve_handle_key(TuiApp *app, int key) {
             else if (bits <= 28) verdict = "need info leak";
             else verdict = "strong ASLR";
 
-            snprintf(buf, sizeof(buf), "%-20s  base 0x%lx  ~%d bits entropy  %s",
+            snprintf(buf, sizeof(buf), "%-20.20s  base 0x%lx  ~%d bits entropy  %s",
                 lbl, (unsigned long)base, bits, verdict);
             fields_add(&app->middle_data, buf, 0, 0, DETAIL_NONE, -1);
         }

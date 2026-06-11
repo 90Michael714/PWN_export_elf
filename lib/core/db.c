@@ -1679,7 +1679,7 @@ int db_query_addr_all(AnalysisDB *db, uint64_t addr,
         int nc=db_query_func_callers(db,func.start_addr,callers,32);
         if(nc>0){
             for(int i=0;i<nc&&i<12;i++){
-                DbInsn ci;char lb[64]="";
+                DbInsn ci;char lb[256]="";
                 if(db_query_insn(db,callers[i],&ci)==0)
                     snprintf(lb,sizeof(lb),"  %s %s",ci.mnemonic,ci.op_str);
                 snprintf(buf,sizeof(buf),"0x%lx%s",(unsigned long)callers[i],lb);
@@ -2197,7 +2197,7 @@ int db_dataflow_query(AnalysisDB *db, uint64_t addr, PanelData *pd) {
 
 int db_trace_args(AnalysisDB *db, uint64_t call_addr, PanelData *pd) {
     if (!db || !pd) return -1;
-    char buf[512];
+    char buf[1024];
 
     /* 查找被调用函数名 */
     char callee[128] = "?";
@@ -2328,7 +2328,7 @@ int db_trace_args(AnalysisDB *db, uint64_t call_addr, PanelData *pd) {
                 const char *marker = is_tainted ? "\xe2\x86\x93 TAINTED" :
                                      is_stack  ? "[stack]" :
                                      is_imm    ? "[const]" : "[reg]";
-                snprintf(buf,sizeof(buf),"%s (R%cI): %s %s  @ 0x%lx  %s",
+                snprintf(buf,sizeof(buf),"%s (R%cI): %.31s %.159s  @ 0x%lx  %s",
                     arg_names[ai], ai==0?'D':'S', prev_mn[i], prev_op[i],
                     (unsigned long)prev_addrs[i], marker);
                 fields_add(pd,buf,1,1,DETAIL_NONE,(int)prev_addrs[i]);
@@ -2343,7 +2343,7 @@ int db_trace_args(AnalysisDB *db, uint64_t call_addr, PanelData *pd) {
 
     /* ── 显示 call 前后的反汇编上下文 ── */
     fields_add(pd,"",0,0,DETAIL_NONE,-1);
-    fields_add(pd,"\xe2\x94\x8c\xe2\x94\x80 Context (\xc2\xb15) \xe2\x94\x80\xe2\x94\x80",1,0,DETAIL_NONE,-1);
+    fields_add(pd,"\xe2\x94\x8c\xe2\x94\x80 Context (\xc2\xb1" "5) \xe2\x94\x80\xe2\x94\x80",1,0,DETAIL_NONE,-1);
     sqlite3_prepare_v2(db->conn,
         "SELECT address,mnemonic,op_str FROM instructions"
         " WHERE address>=?1-32 AND address<=?1+32"
@@ -2416,7 +2416,7 @@ int db_vuln_query(AnalysisDB *db, PanelData *pd) {
     /* 按地址显示 (带函数名和类型) */
     sqlite3_prepare_v2(db->conn,
         "SELECT v.address,v.vuln_type,v.severity,v.sink_func,v.description,"
-        " COALESCE(f.name,'???') as fname"
+        " COALESCE(f.name,'??" "?') as fname"
         " FROM vuln_candidates v LEFT JOIN functions f ON v.function_addr=f.start_addr"
         " ORDER BY CASE v.severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1"
         " WHEN 'MEDIUM' THEN 2 ELSE 3 END, v.address",
@@ -2458,7 +2458,7 @@ int db_vuln_detail(AnalysisDB *db, uint64_t addr, PanelData *pd) {
     sqlite3_stmt *st = NULL;
     sqlite3_prepare_v2(db->conn,
         "SELECT v.vuln_type,v.severity,v.sink_func,v.description,"
-        " COALESCE(f.name,'???') as fname, v.function_addr"
+        " COALESCE(f.name,'??" "?') as fname, v.function_addr"
         " FROM vuln_candidates v LEFT JOIN functions f ON v.function_addr=f.start_addr"
         " WHERE v.address=?", -1, &st, NULL);
     if (!st) return -1;

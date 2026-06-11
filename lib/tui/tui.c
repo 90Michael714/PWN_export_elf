@@ -15,6 +15,7 @@
 #include "tui_colors.h"
 #include "core/cache.h"
 #include "core/debug_worker.h"
+#include "core/reg_view.h"
 #include "disasm.h"
 #include <sqlite3.h>
 #include <stdio.h>
@@ -379,10 +380,10 @@ static void db_cache_path(const char *filename, char *out, size_t sz)
         snprintf(real, sizeof(real), "%s", filename);
 
     /* 检测同目录是否可写 */
-    char test[PATH_MAX];
+    char test[PATH_MAX + 8];
     snprintf(test, sizeof(test), "%s.db", real);
     FILE *fp = fopen(test, "a");
-    if (fp) { fclose(fp); snprintf(out, sz, "%s", test); return; }
+    if (fp) { fclose(fp); strncpy(out, test, sz); if (sz > 0) out[sz-1] = '\0'; return; }
 
     /* 回退: ~/.cache/elf-tui/db/<hash>.db */
     const char *home = getenv("HOME");
@@ -398,7 +399,7 @@ static void db_cache_path(const char *filename, char *out, size_t sz)
     unsigned long hash = 5381;
     for (const char *p = real; *p; p++)
         hash = ((hash << 5) + hash) + (unsigned char)*p;
-    snprintf(out, sz, "%s/%lx.db", dir, hash);
+    snprintf(out, sz, "%.*s/%lx.db", (int)(sizeof(dir)-1), dir, hash);
 }
 
 /* ================================================================
@@ -461,7 +462,7 @@ TuiApp* tui_create(Elf64_Ctx *elf){
         char left[16][80];
         int nl = 0;
         snprintf(left[nl++], sizeof(left[0]), "File:  %s", elf->filename);
-        snprintf(left[nl++], sizeof(left[0]), "");
+        left[nl][0] = '\0'; nl++;
         snprintf(left[nl++], sizeof(left[0]), "  Magic:    %02X %02X %02X %02X",
                  ehdr->e_ident[0], ehdr->e_ident[1],
                  ehdr->e_ident[2], ehdr->e_ident[3]);
@@ -489,9 +490,9 @@ TuiApp* tui_create(Elf64_Ctx *elf){
         /* ── 右栏: 安全加固 + 语言检测 ── */
         char right[16][80];
         int nr = 0;
-        snprintf(right[nr++], sizeof(right[0]), "");
+        right[nr][0] = '\0'; nr++;
         snprintf(right[nr++], sizeof(right[0]), "Security Checks");
-        snprintf(right[nr++], sizeof(right[0]), "");
+        right[nr][0] = '\0'; nr++;
 
         /* NX */
         int nx = 1;
@@ -733,15 +734,15 @@ void tui_render_all(TuiApp *app){
             char *regs_to_annotate[] = {"RIP","RDI","RSI","RDX","RAX","RSP","RBP",NULL};
             for(int ri=0;ri<app->middle_data.count;ri++){
                 char rn[8]; uint64_t rv=0;
-                if(sscanf(app->middle_data.fields[ri].text,"%4s 0x%llx",rn,&rv)==2||
-                   sscanf(app->middle_data.fields[ri].text,"%3s 0x%llx",rn,&rv)==2){
+                if(sscanf(app->middle_data.fields[ri].text,"%4s 0x%lx",rn,&rv)==2||
+                   sscanf(app->middle_data.fields[ri].text,"%3s 0x%lx",rn,&rv)==2){
                     for(char **ra=regs_to_annotate;*ra;ra++){
                         if(!strcmp(rn,*ra)&&rv>0x1000){
                             char sn[64]="";int64_t off=0;
                             if(query_symbol(app->qdb,rv,sn,sizeof(sn),&off)==0&&sn[0]){
                                 char annot[96];
-                                if(off)snprintf(annot,sizeof(annot),"%-4s 0x%llx  <%s+0x%lx>",rn,rv,sn,(long)off);
-                                else snprintf(annot,sizeof(annot),"%-4s 0x%llx  <%s>",rn,rv,sn);
+                                if(off)snprintf(annot,sizeof(annot),"%-4s 0x%lx  <%s+0x%lx>",rn,rv,sn,(long)off);
+                                else snprintf(annot,sizeof(annot),"%-4s 0x%lx  <%s>",rn,rv,sn);
                                 free(app->middle_data.fields[ri].text);
                                 app->middle_data.fields[ri].text=strdup(annot);
                             }

@@ -103,7 +103,7 @@ typedef struct {
     const char *func_name;
     source_type_t type;
     int          taint_id;
-    char         desc[128];
+    char         desc[192];
 } taint_source_t;
 
 typedef struct {

@@ -69,8 +69,8 @@ int rt_read_elf_syms(const char *path, rt_sym_t *out, int max)
     char *strs=malloc((size_t)dsize);
     Elf64_Sym *syms=malloc((size_t)ssize);
     if (!strs||!syms){free(strs);free(syms);fclose(fp);return 0;}
-    fseek(fp,doff,SEEK_SET);fread(strs,(size_t)dsize,1,fp);
-    fseek(fp,soff,SEEK_SET);fread(syms,(size_t)ssize,1,fp);
+    fseek(fp,doff,SEEK_SET);(void)!fread(strs,(size_t)dsize,1,fp);
+    fseek(fp,soff,SEEK_SET);(void)!fread(syms,(size_t)ssize,1,fp);
     fclose(fp);
 
     int n=0, ns=ssize/(int)sizeof(Elf64_Sym);

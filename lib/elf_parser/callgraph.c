@@ -248,11 +248,11 @@ static bool cg_on_insn(const cs_insn *insn, void *user)
     e->to_addr   = target;
 
     /* 解析名称: 使用预构建的二分查找表 (O(log N) vs 原始 O(N)) */
-    char buf[128];
+    char buf[192];
     snprintf(e->from_name, sizeof(e->from_name), "%s",
              coll->current_func);
     sym_lookup_resolve(coll->sym_tab, coll->sym_count, target, buf, sizeof(buf));
-    snprintf(e->to_name, sizeof(e->to_name), "%s", buf);
+    snprintf(e->to_name, sizeof(e->to_name), "%.127s", buf);
 
     return true;
 }
