@@ -1,6 +1,6 @@
-#ingore
-Makefile linguist-documentation=true
+
+/[Mm]akefile linguist-documentation=true
 *.mk linguist-documentation=true
-#ingore
-CMakeLists.txt linguist-documentation=true
+
+/CMakeLists.txt linguist-documentation=true
 *.cmake linguist-documentation=true
