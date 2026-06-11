@@ -40,6 +40,10 @@ gadget search — without leaving the terminal.
 
 ## Quick Start
 
+- ~ git clone https://github.com/90Michael714/PWN_export_elf
+- ~ cd PWN_elf_tui
+- ./elf_tui binary
+
 ### Prerequisites
 
 - Linux x86-64 (native or WSL2) — ONLY x86-64 ELF
@@ -72,7 +76,7 @@ sudo apk add gcc cmake make notcurses-dev capstone-dev sqlite-dev
 ### 2. Build
 
 ```bash
-git clone https://github.com/<your-org>/elf-tui.git
+git clone https://github.com/<your-org>/PWN_elf_tui.git
 cd elf-tui
 make          # auto-runs cmake + make
 ```
@@ -272,99 +276,6 @@ Press `Space` anywhere to open global search. Supports query templates:
           │  - SQLite3   (analysis DB)    │
           │  - ptrace(2) (debugging)      │
           └───────────────────────────────┘
-```
-
-### Source Tree
-
-```
-elf-tui/
-├── CMakeLists.txt              # Build configuration
-├── README.md                   # This file
-├── docs/
-│   └── COORDINATION.md         # Multi-developer coordination rules
-├── include/
-│   ├── elf_parser.h            # ELF64 types, PanelData, parser API (600 lines)
-│   ├── tui.h                   # TuiApp state, popup API
-│   ├── tui_buttons.h           # Button ID enum (40 entries), action declarations
-│   ├── tui_panels.h            # ActivePanel enum, panel init declarations
-│   ├── tui_colors.h            # Color constants
-│   ├── disasm.h                # Capstone wrapper API
-│   ├── core/
-│   │   ├── db.h                # AnalysisDB lifecycle + query API
-│   │   ├── debug_worker.h      # Ptrace debug engine API
-│   │   ├── pt_trace.h          # Trace backend abstraction (Intel PT / BTS / SW)
-│   │   ├── worker.h            # Async worker thread pool
-│   │   ├── query.h             # Symbol/address query bus
-│   │   └── ...                 # Other core module headers
-├── src/
-│   └── main.c                  # Entry point: elf_open → tui_create → tui_run
-├── lib/
-│   ├── elf_parser/             # 46 static analysis modules
-│   │   ├── elf_parser.c        # Core: elf_open, elf_close, mmap management
-│   │   ├── disasm.c            # Capstone-based x86-64 Intel syntax disassembly
-│   │   ├── symtab.c            # Symbol table (static + DB-backed)
-│   │   ├── security.c          # Mitigation hardening check
-│   │   ├── danger.c            # Dangerous function detection
-│   │   ├── gadget.c            # ROP gadget search
-│   │   ├── cfg_view.c          # Control Flow Graph rendering
-│   │   ├── xref.c              # Cross-reference analysis
-│   │   ├── decompile.c         # C pseudo-code decompilation
-│   │   └── ...                 # 40 more parser modules
-│   ├── core/                   # 21 backend engine modules
-│   │   ├── db.c                # SQLite schema (35 tables), import, query API (3200 lines)
-│   │   ├── debug_worker.c      # Ptrace: ATTACH → GETREGS → CONT/STEP → DETACH
-│   │   ├── pt_trace.c          # Intel PT / BTS / Software trace recording
-│   │   ├── fuzz_engine.c       # In-process mutation fuzzer
-│   │   ├── heap_analyzer.c     # Heap layout analysis (ptmalloc/jemalloc)
-│   │   ├── worker.c            # Thread pool for async analysis jobs
-│   │   ├── cache.c             # Result cache for repeated queries
-│   │   └── ...                 # 14 more core modules
-│   └── tui/                    # 42 TUI rendering + button action modules
-│       ├── tui.c               # Main render loop, layout, popups (1064 lines)
-│       ├── tui_input.c         # Keyboard input dispatch (962 lines)
-│       ├── tui_left.c          # Left panel navigation tree builder
-│       ├── tui_middle.c        # Middle panel detail expansion
-│       ├── tui_right.c         # Right panel explanation view
-│       ├── tui_status.c        # Status bar rendering
-│       └── buttons/            # 36 button action handlers
-│           ├── btn_dispatch.c  # Button ID → action function router (40 cases)
-│           ├── btn_common.c    # Registry-based button forwarding
-│           ├── btn_disasm.c    # Disassembly view action
-│           ├── btn_new_features.c  # Phase 2+ feature actions (PT Trace, Heap,
-│           │                   #   DataFlow, Decompile, etc.)
-│           └── ...             # 33 more button action files
-```
-
-### Data Flow
-
-```
-User Input (keyboard)
-  │
-  ▼
-select() + notcurses_get  →  read_key()  →  tui_handle_input()
-  │                                              │
-  │                         ┌────────────────────┤
-  │                         │                    │
-  │                    Navigation            Button Action
-  │                    (left panel)          (btn_dispatch)
-  │                         │                    │
-  │                         ▼                    ▼
-  │                    parse_xxx()          btn_xxx_action()
-  │                         │                    │
-  │                         └────────┬───────────┘
-  │                                  │
-  │                                  ▼
-  │                         PanelData (fields[])
-  │                                  │
-  │                                  ▼
-  │                         tui_render_all()
-  │                         - region_clear()
-  │                         - region_border()
-  │                         - region_lines()
-  │                         - notcurses_render()
-  │                                  │
-  │                                  ▼
-  └────────────────────────── Terminal Output
 ```
 
 ### Analysis Database
