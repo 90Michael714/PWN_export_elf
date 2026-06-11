@@ -42,23 +42,52 @@ gadget search — without leaving the terminal.
 
 ### Prerequisites
 
-- Linux x86-64 (native or WSL2)  ONLY x86-64 ELF
+- Linux x86-64 (native or WSL2) — ONLY x86-64 ELF
 - GCC 13+ (C17)
 - CMake 3.16+
 
-### Dependencies
+### 1. Install Dependencies
 
-| Library | Version | Purpose |
-|---------|---------|---------|
-| [notcurses](https://github.com/dankamongmen/notcurses) | 3.0+ | Terminal UI rendering |
-| [Capstone](https://www.capstone-engine.org/) | 4.0+ | x86-64 disassembly engine |
-| [SQLite3](https://www.sqlite.org/) | 3.x | Persistent analysis database |
+```bash
+# Auto-detect distro and install everything:
+make deps
 
-### Build && Run
+# Or manually — choose your distro:
+# Ubuntu / Debian / Linux Mint:
+sudo apt install cmake gcc make libnotcurses-dev libcapstone-dev libsqlite3-dev
+
+# Fedora / RHEL / CentOS:
+sudo dnf install gcc cmake make notcurses-devel capstone-devel sqlite-devel
+
+# Arch / Manjaro:
+sudo pacman -S gcc cmake make notcurses capstone sqlite3
+
+# openSUSE:
+sudo zypper install gcc cmake make notcurses-devel capstone-devel sqlite3-devel
+
+# Alpine:
+sudo apk add gcc cmake make notcurses-dev capstone-dev sqlite-dev
+```
+
+### 2. Build
+
+```bash
+git clone https://github.com/<your-org>/elf-tui.git
+cd elf-tui
+make          # auto-runs cmake + make
+```
+
+### 3. Run
 
 ```bash
 ./build/elf-tui /bin/ls          # Analyze any ELF64 binary
 ./build/elf-tui ~/my-binary      # Analyze your target
+```
+
+### Quick Check
+
+```bash
+make check     # verify all build dependencies are installed
 ```
 
 ## Keyboard Reference
