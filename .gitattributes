@@ -1,9 +1,0 @@
-#
-**/[Mm]akefile linguist-vendor=true
-**/[Mm]akefile.* linguist-vendor=true
-**/*.mk linguist-vendor=true
-
-**/CMakeLists.txt linguist-vendor=true
-**/*.cmake linguist-vendor=true
-build/* linguist-vendor
-
