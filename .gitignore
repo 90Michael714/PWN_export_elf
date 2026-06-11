@@ -1,0 +1,17 @@
+# Build output
+build/
+*.o
+*.so
+*.a
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+__MACOSX/

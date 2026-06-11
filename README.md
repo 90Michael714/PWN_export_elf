@@ -505,4 +505,3 @@ MIT License
 ## Author
 
 Michael — Linux ELF binary vulnerability researcher.
->>>>>>> 2bcf605 (Save local elf-tui files)
